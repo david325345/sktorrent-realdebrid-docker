@@ -297,25 +297,24 @@ async function pickAndUnrestrict(token,info,season,episode){
 }
 
 // Stáhni celý batch na pozadí (fire-and-forget)
+const prefetchedHashes=new Set();
 async function prefetchBatch(token,hash){
+    if(prefetchedHashes.has(hash)){console.log(`[RD] 📦 Batch ${hash.slice(0,8)} už prefetchován`);return;}
+    prefetchedHashes.add(hash);
     try{
         console.log(`[RD] 📦 Prefetch batch: ${hash}`);
         const tid=await rdAddMagnet(token,hash);if(!tid)return;
         let info;
         for(let i=0;i<5;i++){
             info=await rdInfo(token,tid);if(!info)return;
-            if(info.status==="downloaded")return; // Už staženo
+            if(info.status==="downloaded"){console.log(`[RD] 📦 Batch už stažen`);return;}
             if(info.status==="waiting_files_selection")break;
             if(["magnet_error","error","virus","dead"].includes(info.status)){await rdDelete(token,tid);return;}
             await new Promise(r=>setTimeout(r,1000));
         }
         if(info.status==="waiting_files_selection"&&info.files?.length>0){
-            const videos=info.files.filter(f=>isVideo(f.path));
-            if(videos.length>1){
-                const fids=videos.map(f=>String(f.id)).join(",");
-                await rdSelect(token,tid,fids);
-                console.log(`[RD] 📦 Prefetch: ${videos.length} souborů vybráno → stahuje se`);
-            }
+            await rdSelect(token,tid,"all");
+            console.log(`[RD] 📦 Prefetch: ALL soubory vybráno → stahuje se`);
         }
     }catch(e){console.log(`[RD] 📦 Prefetch error: ${e.message}`);}
 }
