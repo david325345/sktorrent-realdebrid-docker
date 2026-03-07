@@ -245,51 +245,79 @@ async function resolveRDAll(token,hash){
 // Vyber správný soubor z batch torrentu a unrestrict
 async function pickAndUnrestrict(token,info,season,episode){
     const selected=(info.files||[]).filter(f=>f.selected===1&&isVideo(f.path));
-    console.log(`[RD] 📁 pickAndUnrestrict: ${selected.length} selected, ${info.links.length} links, S${season}E${episode}`);
+    const linkCount=info.links?.length||0;
+    console.log(`[RD] 📁 pick: ${selected.length} files, ${linkCount} links, S${season??'-'}E${episode??'-'}`);
     
-    if(selected.length<=1||season===undefined||episode===undefined){
+    if(linkCount===0)return null;
+    if(linkCount===1||season===undefined||episode===undefined){
         return await rdUnrestrict(token,info.links[0]);
     }
     
-    // Batch — najdi správnou epizodu v selected souborech
-    const epTag=`S${String(season).padStart(2,'0')}E${String(episode).padStart(2,'0')}`;
+    const ep=String(episode).padStart(2,'0');
+    const se=String(season).padStart(2,'0');
     const pats=[
-        new RegExp(`S${String(season).padStart(2,'0')}E${String(episode).padStart(2,'0')}`,'i'),
-        new RegExp(`${season}x${String(episode).padStart(2,'0')}`,'i'),
-        new RegExp(`[._\\-\\s]E${String(episode).padStart(2,'0')}[._\\-\\s]`,'i')
+        new RegExp(`[Ss]${se}[Ee]${ep}[^0-9]`),
+        new RegExp(`[Ss]${se}[Ee]${ep}$`),
+        new RegExp(`${season}x${ep}`,'i'),
+        new RegExp(`[._\\- ]E${ep}[._\\- ]`,'i'),
+        new RegExp(`[._\\- ]${ep}[._\\- ]`)
     ];
     
-    // RD links odpovídají selected souborům v pořadí file ID
-    // Seřaď selected podle ID aby odpovídaly linkům
-    const sortedSelected=[...selected].sort((a,b)=>a.id-b.id);
-    
-    let hitIdx=-1;
-    for(const p of pats){
-        hitIdx=sortedSelected.findIndex(f=>p.test(f.path));
-        if(hitIdx>=0)break;
-    }
-    
-    if(hitIdx>=0&&hitIdx<info.links.length){
-        console.log(`[RD] 📁 Batch: ${epTag} → soubor ${hitIdx+1}/${sortedSelected.length} "${sortedSelected[hitIdx]?.path?.split('/')?.pop()}"`);
-        return await rdUnrestrict(token,info.links[hitIdx]);
-    }
-    
-    // Fallback — zkus unrestrict všechny linky a najdi epizodu v URL
-    console.log(`[RD] 📁 Batch: ${epTag} nenalezen v files, zkouším linky...`);
-    for(let i=0;i<info.links.length;i++){
-        const url=await rdUnrestrict(token,info.links[i]);
-        if(url){
-            for(const p of pats){
-                if(p.test(url)){
-                    console.log(`[RD] 📁 Batch: ${epTag} nalezen v link ${i+1}`);
-                    return url;
-                }
+    // Strategie 1: najdi v selected souborech (seřazených podle ID)
+    if(selected.length===linkCount){
+        const sorted=[...selected].sort((a,b)=>a.id-b.id);
+        for(const p of pats){
+            const idx=sorted.findIndex(f=>p.test(f.path));
+            if(idx>=0){
+                console.log(`[RD] 📁 Match v files[${idx}]: "${sorted[idx].path.split('/').pop()}"`);
+                return await rdUnrestrict(token,info.links[idx]);
             }
         }
     }
     
-    console.log(`[RD] 📁 Batch: ${epTag} fallback na první link`);
-    return await rdUnrestrict(token,info.links[0]);
+    // Strategie 2: unrestrict každý link a zkontroluj název v URL
+    console.log(`[RD] 📁 Zkouším unrestrict linků...`);
+    const urls=[];
+    for(let i=0;i<linkCount;i++){
+        const url=await rdUnrestrict(token,info.links[i]);
+        if(!url)continue;
+        urls.push(url);
+        const decoded=decodeURIComponent(url);
+        for(const p of pats){
+            if(p.test(decoded)){
+                console.log(`[RD] 📁 Match v URL[${i}]: S${se}E${ep}`);
+                return url;
+            }
+        }
+    }
+    
+    // Fallback
+    console.log(`[RD] 📁 Fallback na první link`);
+    return urls[0]||await rdUnrestrict(token,info.links[0]);
+}
+
+// Stáhni celý batch na pozadí (fire-and-forget)
+async function prefetchBatch(token,hash){
+    try{
+        console.log(`[RD] 📦 Prefetch batch: ${hash}`);
+        const tid=await rdAddMagnet(token,hash);if(!tid)return;
+        let info;
+        for(let i=0;i<5;i++){
+            info=await rdInfo(token,tid);if(!info)return;
+            if(info.status==="downloaded")return; // Už staženo
+            if(info.status==="waiting_files_selection")break;
+            if(["magnet_error","error","virus","dead"].includes(info.status)){await rdDelete(token,tid);return;}
+            await new Promise(r=>setTimeout(r,1000));
+        }
+        if(info.status==="waiting_files_selection"&&info.files?.length>0){
+            const videos=info.files.filter(f=>isVideo(f.path));
+            if(videos.length>1){
+                const fids=videos.map(f=>String(f.id)).join(",");
+                await rdSelect(token,tid,fids);
+                console.log(`[RD] 📦 Prefetch: ${videos.length} souborů vybráno → stahuje se`);
+            }
+        }
+    }catch(e){console.log(`[RD] 📦 Prefetch error: ${e.message}`);}
 }
 
 async function resolveRD(token,hash,season,episode){
@@ -308,7 +336,14 @@ async function resolveRD(token,hash,season,episode){
         if(info.status==="downloaded"&&info.links?.length>0){
             // Najdi správný link pro epizodu v batch
             const url=await pickAndUnrestrict(token,info,season,episode);
-            if(url){resolveCache.set(ck,{url,ts:Date.now()});console.log("[RD] ✅ Cached");return url;}
+            if(url){
+                resolveCache.set(ck,{url,ts:Date.now()});console.log("[RD] ✅ Cached");
+                // Prefetch celý batch na pozadí
+                if(season!==undefined&&info.links.length===1){
+                    prefetchBatch(token,hash);
+                }
+                return url;
+            }
             await rdDelete(token,tid);return null;
         }
         if(info.status==="waiting_files_selection")break;
@@ -335,7 +370,14 @@ async function resolveRD(token,hash,season,episode){
         info=await rdInfo(token,tid);if(!info)return null;
         if(info.status==="downloaded"&&info.links?.length>0){
             const url=await pickAndUnrestrict(token,info,season,episode);
-            if(url){resolveCache.set(ck,{url,ts:Date.now()});console.log("[RD] ✅ Ready");return url;}
+            if(url){
+                resolveCache.set(ck,{url,ts:Date.now()});console.log("[RD] ✅ Ready");
+                // Prefetch celý batch na pozadí
+                if(season!==undefined&&info.links.length===1){
+                    prefetchBatch(token,hash);
+                }
+                return url;
+            }
             return null;
         }
         if(["magnet_error","error","virus","dead"].includes(info.status)){await rdDelete(token,tid);return null;}
