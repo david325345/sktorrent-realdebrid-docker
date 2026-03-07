@@ -8,7 +8,7 @@ const express = require("express");
 const BASE_URL = "https://sktorrent.eu";
 const SEARCH_URL = `${BASE_URL}/torrent/torrents_v2.php`;
 const RD_API = "https://api.real-debrid.com/rest/1.0";
-const PORT = process.env.PORT || 7000;
+const PORT = process.env.PORT || 3009;
 
 const langToFlag = { CZ:"🇨🇿",SK:"🇸🇰",EN:"🇬🇧",US:"🇺🇸",DE:"🇩🇪",FR:"🇫🇷",IT:"🇮🇹",ES:"🇪🇸",RU:"🇷🇺",PL:"🇵🇱",HU:"🇭🇺",JP:"🇯🇵" };
 const VIDEO_EXT = [".mkv",".mp4",".avi",".mov",".wmv",".flv",".webm",".ts",".m4v"];
@@ -242,6 +242,35 @@ async function resolveRDAll(token,hash){
     return result;
 }
 
+// Vyber správný soubor z batch torrentu a unrestrict
+async function pickAndUnrestrict(token,info,season,episode){
+    const selected=(info.files||[]).filter(f=>f.selected===1&&isVideo(f.path));
+    if(selected.length<=1||season===undefined||episode===undefined){
+        // Jeden soubor nebo film → první/největší link
+        return await rdUnrestrict(token,info.links[0]);
+    }
+    // Batch — najdi správnou epizodu
+    const epTag=`S${String(season).padStart(2,'0')}E${String(episode).padStart(2,'0')}`;
+    const pats=[
+        new RegExp(`S${String(season).padStart(2,'0')}E${String(episode).padStart(2,'0')}`,'i'),
+        new RegExp(`${season}x${String(episode).padStart(2,'0')}`,'i'),
+        new RegExp(`[._\\-\\s]E${String(episode).padStart(2,'0')}[._\\-\\s]`,'i')
+    ];
+    // Mapuj selected soubory na linky (RD vrací linky v pořadí selected)
+    let hitIdx=-1;
+    for(const p of pats){
+        hitIdx=selected.findIndex(f=>p.test(f.path));
+        if(hitIdx>=0)break;
+    }
+    if(hitIdx>=0&&hitIdx<info.links.length){
+        console.log(`[RD] 📁 Batch: ${epTag} → soubor ${hitIdx+1}/${selected.length}`);
+        return await rdUnrestrict(token,info.links[hitIdx]);
+    }
+    // Fallback — největší soubor
+    console.log(`[RD] 📁 Batch: ${epTag} nenalezen, fallback na největší`);
+    return await rdUnrestrict(token,info.links[0]);
+}
+
 async function resolveRD(token,hash,season,episode){
     const ck=`${hash}-${season}-${episode}`;const cached=resolveCache.get(ck);
     if(cached&&Date.now()-cached.ts<CACHE_TTL){
@@ -256,7 +285,8 @@ async function resolveRD(token,hash,season,episode){
     for(let i=0;i<5;i++){
         info=await rdInfo(token,tid);if(!info){await rdDelete(token,tid);return null;}
         if(info.status==="downloaded"&&info.links?.length>0){
-            const url=await rdUnrestrict(token,info.links[0]);
+            // Najdi správný link pro epizodu v batch
+            const url=await pickAndUnrestrict(token,info,season,episode);
             if(url){resolveCache.set(ck,{url,ts:Date.now()});console.log("[RD] ✅ Cached");return url;}
             await rdDelete(token,tid);return null;
         }
@@ -283,7 +313,7 @@ async function resolveRD(token,hash,season,episode){
     for(let i=0;i<5;i++){
         info=await rdInfo(token,tid);if(!info)return null;
         if(info.status==="downloaded"&&info.links?.length>0){
-            const url=await rdUnrestrict(token,info.links[0]);
+            const url=await pickAndUnrestrict(token,info,season,episode);
             if(url){resolveCache.set(ck,{url,ts:Date.now()});console.log("[RD] ✅ Ready");return url;}
             return null;
         }
