@@ -378,6 +378,7 @@ const app=express();
 
 
 
+app.get("/health",(req,res)=>{res.json({status:"ok"});});
 app.get("/",(req,res)=>{res.setHeader("Content-Type","text/html; charset=utf-8");res.send(html());});
 app.get("/configure",(req,res)=>{res.setHeader("Content-Type","text/html; charset=utf-8");res.send(html());});
 
@@ -701,12 +702,14 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
     }catch(e){console.error("Error:",e.message);return res.json({streams:[]});}
 });
 
-// PLAY
-app.get("/:token/play/:hash/video.mp4",async(req,res)=>{
-    const{hash}=req.params;
+// PLAY - seriály (s season/episode) - MUSÍ BÝT PŘED filmovou route
+app.get("/:token/play/:hash/:season/:episode/video.mp4",async(req,res)=>{
+    const{hash,season:sRaw,episode:eRaw}=req.params;
     const{rdToken}=parseToken(req.params.token);
-    console.log(`\n▶️ Play: ${hash} S-E- (no season)`);
-    const streamUrl=await resolveRD(rdToken,hash);
+    const season=parseInt(sRaw);
+    const episode=parseInt(eRaw);
+    console.log(`\n▶️ Play: ${hash} S${season}E${episode}`);
+    const streamUrl=await resolveRD(rdToken,hash,season,episode);
     if(!streamUrl){
         console.log("[Play] 🕐 Torrent se stahuje → redirect na info video");
         return res.redirect(302,DOWNLOADING_VIDEO_URL);
@@ -715,13 +718,12 @@ app.get("/:token/play/:hash/video.mp4",async(req,res)=>{
     return res.redirect(302,streamUrl);
 });
 
-app.get("/:token/play/:hash/:season/:episode/video.mp4",async(req,res)=>{
+// PLAY - filmy (bez season/episode)
+app.get("/:token/play/:hash/video.mp4",async(req,res)=>{
     const{hash}=req.params;
     const{rdToken}=parseToken(req.params.token);
-    const season=parseInt(req.params.season);
-    const episode=parseInt(req.params.episode);
-    console.log(`\n▶️ Play: ${hash} S${season}E${episode}`);
-    const streamUrl=await resolveRD(rdToken,hash,season,episode);
+    console.log(`\n▶️ Play: ${hash} (film)`);
+    const streamUrl=await resolveRD(rdToken,hash);
     if(!streamUrl){
         console.log("[Play] 🕐 Torrent se stahuje → redirect na info video");
         return res.redirect(302,DOWNLOADING_VIDEO_URL);
