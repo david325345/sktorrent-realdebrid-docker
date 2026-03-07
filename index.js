@@ -715,7 +715,8 @@ app.get("/:token/play/:hash/:season/:episode/video.mp4",async(req,res)=>{
         return res.redirect(302,DOWNLOADING_VIDEO_URL);
     }
     console.log(`[Play] ✅ Redirect → ${streamUrl.slice(0,80)}...`);
-    return res.redirect(302,streamUrl);
+    res.setHeader('Location',streamUrl);
+    return res.status(302).end();
 });
 
 // PLAY - filmy (bez season/episode)
