@@ -245,29 +245,50 @@ async function resolveRDAll(token,hash){
 // Vyber správný soubor z batch torrentu a unrestrict
 async function pickAndUnrestrict(token,info,season,episode){
     const selected=(info.files||[]).filter(f=>f.selected===1&&isVideo(f.path));
+    console.log(`[RD] 📁 pickAndUnrestrict: ${selected.length} selected, ${info.links.length} links, S${season}E${episode}`);
+    
     if(selected.length<=1||season===undefined||episode===undefined){
-        // Jeden soubor nebo film → první/největší link
         return await rdUnrestrict(token,info.links[0]);
     }
-    // Batch — najdi správnou epizodu
+    
+    // Batch — najdi správnou epizodu v selected souborech
     const epTag=`S${String(season).padStart(2,'0')}E${String(episode).padStart(2,'0')}`;
     const pats=[
         new RegExp(`S${String(season).padStart(2,'0')}E${String(episode).padStart(2,'0')}`,'i'),
         new RegExp(`${season}x${String(episode).padStart(2,'0')}`,'i'),
         new RegExp(`[._\\-\\s]E${String(episode).padStart(2,'0')}[._\\-\\s]`,'i')
     ];
-    // Mapuj selected soubory na linky (RD vrací linky v pořadí selected)
+    
+    // RD links odpovídají selected souborům v pořadí file ID
+    // Seřaď selected podle ID aby odpovídaly linkům
+    const sortedSelected=[...selected].sort((a,b)=>a.id-b.id);
+    
     let hitIdx=-1;
     for(const p of pats){
-        hitIdx=selected.findIndex(f=>p.test(f.path));
+        hitIdx=sortedSelected.findIndex(f=>p.test(f.path));
         if(hitIdx>=0)break;
     }
+    
     if(hitIdx>=0&&hitIdx<info.links.length){
-        console.log(`[RD] 📁 Batch: ${epTag} → soubor ${hitIdx+1}/${selected.length}`);
+        console.log(`[RD] 📁 Batch: ${epTag} → soubor ${hitIdx+1}/${sortedSelected.length} "${sortedSelected[hitIdx]?.path?.split('/')?.pop()}"`);
         return await rdUnrestrict(token,info.links[hitIdx]);
     }
-    // Fallback — největší soubor
-    console.log(`[RD] 📁 Batch: ${epTag} nenalezen, fallback na největší`);
+    
+    // Fallback — zkus unrestrict všechny linky a najdi epizodu v URL
+    console.log(`[RD] 📁 Batch: ${epTag} nenalezen v files, zkouším linky...`);
+    for(let i=0;i<info.links.length;i++){
+        const url=await rdUnrestrict(token,info.links[i]);
+        if(url){
+            for(const p of pats){
+                if(p.test(url)){
+                    console.log(`[RD] 📁 Batch: ${epTag} nalezen v link ${i+1}`);
+                    return url;
+                }
+            }
+        }
+    }
+    
+    console.log(`[RD] 📁 Batch: ${epTag} fallback na první link`);
     return await rdUnrestrict(token,info.links[0]);
 }
 
