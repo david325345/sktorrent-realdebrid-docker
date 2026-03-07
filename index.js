@@ -681,12 +681,25 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
 });
 
 // PLAY
-app.get("/:token/play/:hash/:season?/:episode?/video.mp4",async(req,res)=>{
+app.get("/:token/play/:hash/video.mp4",async(req,res)=>{
     const{hash}=req.params;
     const{rdToken}=parseToken(req.params.token);
-    const season=req.params.season?parseInt(req.params.season):undefined;
-    const episode=req.params.episode?parseInt(req.params.episode):undefined;
-    console.log(`\n▶️ Play: ${hash} S${season??'-'}E${episode??'-'}`);
+    console.log(`\n▶️ Play: ${hash} S-E- (no season)`);
+    const streamUrl=await resolveRD(rdToken,hash);
+    if(!streamUrl){
+        console.log("[Play] 🕐 Torrent se stahuje → redirect na info video");
+        return res.redirect(302,DOWNLOADING_VIDEO_URL);
+    }
+    console.log(`[Play] ✅ Redirect → ${streamUrl.slice(0,80)}...`);
+    return res.redirect(302,streamUrl);
+});
+
+app.get("/:token/play/:hash/:season/:episode/video.mp4",async(req,res)=>{
+    const{hash}=req.params;
+    const{rdToken}=parseToken(req.params.token);
+    const season=parseInt(req.params.season);
+    const episode=parseInt(req.params.episode);
+    console.log(`\n▶️ Play: ${hash} S${season}E${episode}`);
     const streamUrl=await resolveRD(rdToken,hash,season,episode);
     if(!streamUrl){
         console.log("[Play] 🕐 Torrent se stahuje → redirect na info video");
