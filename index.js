@@ -598,7 +598,13 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
         const sn=season!==undefined?String(season):'';
 
         const matchesExactEpisode=(name)=>name.toUpperCase().includes(epTag);
-        const hasAnyEpisode=(name)=>new RegExp(seTag+'E\\d{2}','i').test(name);
+        const hasAnyEpisode=(name)=>{
+            // S13E01, 13x01, E01 formáty
+            if(new RegExp(seTag+'E\\d{2}','i').test(name))return true;
+            if(/\d{1,2}x\d{2}/i.test(name))return true;
+            if(/[._\- ]E\d{2}[._\- ]/i.test(name))return true;
+            return false;
+        };
         const isBatchSeason=(name)=>{
             const up=name.toUpperCase();
             const norm=removeDiacritics(name).toLowerCase();
