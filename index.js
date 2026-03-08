@@ -599,10 +599,11 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
 
         const matchesExactEpisode=(name)=>name.toUpperCase().includes(epTag);
         const hasAnyEpisode=(name)=>{
-            // S13E01, 13x01, E01 formáty
+            // S13E01, 13x01, E01 formáty — ale NE rozsahy (E01-E04)
             if(new RegExp(seTag+'E\\d{2}','i').test(name))return true;
             if(/\d{1,2}x\d{2}/i.test(name))return true;
-            if(/[._\- ]E\d{2}[._\- ]/i.test(name))return true;
+            // E01 ale ne E01-E04 (to je batch)
+            if(/[._\- ]E\d{2}[._\- ]/i.test(name)&&!/E\d{2}\s*-\s*E?\d{2}/i.test(name))return true;
             return false;
         };
         const isBatchSeason=(name)=>{
@@ -628,6 +629,8 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
                 const from=parseInt(czRange[1]),to=parseInt(czRange[2]);
                 if(season>=from&&season<=to&&!hasAnyEpisode(name))return true;
             }
+            // Episode range: E01-E04, E01-E12 = batch
+            if(/E\d{2}\s*-\s*E?\d{2}/i.test(name))return true;
             return false;
         };
 
@@ -668,11 +671,19 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
                 const titlePart=tn.split(/[=(]|\bcsfd\b|\b(19|20)\d{2}\b/i)[0].trim();
                 // Rozděl na části podle / 
                 const parts=titlePart.split(/\s*[\/]\s*/);
-                // Aspoň jedna část musí obsahovat VŠECHNA slova z názvu
+                // Hledej celý název jako frázi (slova vedle sebe)
+                const phrase=titleWords.join(' ');
+                if(parts.some(p=>p.includes(phrase)))return true;
+                // Fallback: aspoň všechna slova v jedné části (pro přeházené pořadí)
                 if(titleWords.length>=2){
-                    return parts.some(p=>titleWords.every(w=>p.includes(w)));
+                    return parts.some(p=>titleWords.every(w=>p.includes(w))&&
+                        // Slova musí být blízko sebe (max 30 znaků mezi prvním a posledním)
+                        (()=>{const positions=titleWords.map(w=>p.indexOf(w)).filter(i=>i>=0);
+                            if(positions.length<titleWords.length)return false;
+                            return Math.max(...positions)-Math.min(...positions)<phrase.length+15;
+                        })()
+                    );
                 }
-                // Jednoslovný název — aspoň hlavní slovo v některé části
                 const mainWord=titleWords[0];
                 return parts.some(p=>p.includes(mainWord));
             };
