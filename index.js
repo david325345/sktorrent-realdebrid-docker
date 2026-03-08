@@ -707,13 +707,24 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
                             if(matchesExactEpisode(t.name)||isBatchSeason(t.name))return false;
                             if(hasAnyEpisode(t.name))return false;
                             const up=t.name.toUpperCase();
+                            const norm=removeDiacritics(t.name).toLowerCase();
+                            // S[číslo] formát — musí být naše sezóna
                             const sMatch=up.match(/S(\d{2})/g);
                             if(sMatch){
                                 const hasMy=sMatch.some(s=>s===seTag);
                                 if(!hasMy)return false;
                             }
-                            const czMatch=removeDiacritics(t.name).match(/(\d+)\s*\.?\s*serie/i);
+                            // CZ "X. serie" — musí být naše sezóna
+                            const czMatch=norm.match(/(\d+)\s*\.?\s*serie/i);
                             if(czMatch&&czMatch[1]!==sn)return false;
+                            // Standalone číslo (01-30) blízko názvu — může být sezóna
+                            // Hledej čísla která nejsou rok, rozlišení, nebo velikost
+                            const cleanForNum=norm.replace(/\b(19|20)\d{2}\b/g,'').replace(/\b\d{3,4}p\b/g,'').replace(/\b\d+\s*(gb|mb|kb)\b/gi,'');
+                            const numMatch=cleanForNum.match(/(?:^|\s|[/\-])0*(\d{1,2})(?:\s|$|[/\-\.])/g);
+                            if(numMatch){
+                                const seasonNums=numMatch.map(n=>parseInt(n.trim().replace(/[^0-9]/g,''))).filter(n=>n>=1&&n<=30);
+                                if(seasonNums.length>0&&!seasonNums.includes(season))return false;
+                            }
                             return true;
                         });
                         if(noSeason.length>0){
