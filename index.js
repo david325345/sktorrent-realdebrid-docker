@@ -613,10 +613,16 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
             if(hasSe&&!hasAnyEpisode(name))return true;
             // "komplet", "complete" = celá série
             if(/\b(komplet|complete)\b/i.test(name)&&!hasAnyEpisode(name))return true;
-            // Multi-season range (S01-S08) — pokud zahrnuje naši sezónu
+            // Multi-season range S01-S08
             const rangeMatch=name.match(/S(\d{2})-S(\d{2})/i);
             if(rangeMatch){
                 const from=parseInt(rangeMatch[1]),to=parseInt(rangeMatch[2]);
+                if(season>=from&&season<=to&&!hasAnyEpisode(name))return true;
+            }
+            // CZ range: "1-5. serie", "1-5. série"
+            const czRange=norm.match(/(\d+)\s*-\s*(\d+)\s*\.?\s*serie/i);
+            if(czRange){
+                const from=parseInt(czRange[1]),to=parseInt(czRange[2]);
                 if(season>=from&&season<=to&&!hasAnyEpisode(name))return true;
             }
             return false;
@@ -684,7 +690,11 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
                 // 3. Holý název - hledej batch i když máme epizody
                 if(!batchTorrents.length&&!sktRateLimited){
                     const found=filterYear(await searchSKT(name,sktUid,sktPass)).filter(t=>matchesTitle(t.name));
+                    console.log(`[SKT] 🔍 Holý název: ${found.length} po filtru`);
                     if(found.length>0){
+                        found.forEach((t,i)=>{
+                            if(i<5)console.log(`[SKT]   [${i}] ep=${matchesExactEpisode(t.name)} batch=${isBatchSeason(t.name)} "${t.name.slice(0,60)}"`);
+                        });
                         const ep=found.filter(t=>matchesExactEpisode(t.name));
                         const batch=found.filter(t=>isBatchSeason(t.name));
                         if(!torrents.length&&ep.length>0)torrents=ep;
