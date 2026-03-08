@@ -654,11 +654,11 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
             if(sktRateLimited)return;
             
             // Ověř že torrent patří k hledanému titulu (bez S05E03 tagů)
-            const cleanName=removeDiacritics(name).replace(/S\d{2}E?\d{0,2}/gi,'').replace(/\d+x\d+/g,'').trim();
+            const cleanName=removeDiacritics(name).replace(/['']/g,'').replace(/S\d{2}E?\d{0,2}/gi,'').replace(/\d+x\d+/g,'').trim();
             const titleWords=cleanName.toLowerCase().replace(/[^a-z0-9\s]/g,'').split(/\s+/).filter(w=>w.length>=2);
             const matchesTitle=(tname)=>{
                 if(titleWords.length===0)return true;
-                let tn=removeDiacritics(tname).toLowerCase().replace(/[^a-z0-9\s\/\-\.]/g,' ');
+                let tn=removeDiacritics(tname).toLowerCase().replace(/['']/g,'').replace(/[^a-z0-9\s\/\-\.]/g,' ');
                 // Odstraň "Stiahni si [kategorie]" prefix
                 tn=tn.replace(/^stiahni si\s+\w+\s+/i,'');
                 // Pro seriály: ořízni název epizody (za " - " po S01E01)
