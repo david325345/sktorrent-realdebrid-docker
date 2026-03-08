@@ -652,9 +652,15 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
             const titleWords=cleanName.toLowerCase().replace(/[^a-z0-9\s]/g,'').split(/\s+/).filter(w=>w.length>=3);
             const matchesTitle=(tname)=>{
                 if(titleWords.length===0)return true;
-                const tn=removeDiacritics(tname).toLowerCase().replace(/[^a-z0-9\s]/g,' ');
-                const firstHalf=tn.slice(0,Math.max(tn.length/2,30));
-                return titleWords.some(w=>firstHalf.includes(w));
+                let tn=removeDiacritics(tname).toLowerCase().replace(/[^a-z0-9\s\/\-]/g,' ');
+                // Pro seriály: ořízni název epizody (za " - " po S01E01)
+                const epPos=tn.search(/s\d{2}e\d{2}/i);
+                if(epPos>=0){
+                    const dashAfterEp=tn.indexOf(' - ',epPos);
+                    if(dashAfterEp>=0)tn=tn.slice(0,dashAfterEp);
+                }
+                const mainWord=titleWords.reduce((a,b)=>a.length>=b.length?a:b,'');
+                return tn.includes(mainWord);
             };
             
             if(type==='series'&&season!==undefined){
