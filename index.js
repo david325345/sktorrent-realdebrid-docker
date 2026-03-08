@@ -729,7 +729,7 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
                         });
                         if(noSeason.length>0){
                             batchTorrents=[...batchTorrents,...noSeason];
-                            console.log(`[SKT] 📦 +${noSeason.length}x batch bez sezóny`);
+                            noSeason.forEach(t=>console.log(`[SKT] 📦 +batch: "${t.name.slice(0,80)}"`));
                         }
                     }
                     await delay(300);
