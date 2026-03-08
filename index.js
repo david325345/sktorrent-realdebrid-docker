@@ -604,8 +604,12 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
         const hasAnyEpisode=(name)=>new RegExp(seTag+'E\\d{2}','i').test(name);
         const isBatchSeason=(name)=>{
             const up=name.toUpperCase();
-            // Má sezónu (S01, 1.serie) a nemá epizodu
-            const hasSe=up.includes(seTag)||(new RegExp(`(^|\\W)${sn}\\s*\\.?\\s*seri[ea]|seri[ea]\\s*${sn}(\\W|$)`,'i')).test(name);
+            const norm=removeDiacritics(name).toLowerCase();
+            // Má sezónu (S05, 5.serie, 5. Série, Série 5) a nemá epizodu
+            const hasSe=up.includes(seTag)
+                ||(new RegExp(`(^|\\W)${sn}\\s*\\.?\\s*s[eé]ri[ea]`,'i')).test(name)
+                ||(new RegExp(`s[eé]ri[ea]\\s*${sn}(\\W|$)`,'i')).test(name)
+                ||(new RegExp(`(^|\\W)${sn}\\s*\\.?\\s*serie`,'i')).test(norm);
             if(hasSe&&!hasAnyEpisode(name))return true;
             // "komplet", "complete" = celá série
             if(/\b(komplet|complete)\b/i.test(name)&&!hasAnyEpisode(name))return true;
@@ -664,6 +668,11 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
                 if(!batchTorrents.length&&!sktRateLimited){
                     const found=filterYear(await searchSKT(name+' '+seTag,sktUid,sktPass)).filter(t=>matchesTitle(t.name));
                     if(found.length>0){
+                        console.log(`[SKT] 🔍 Sezóna search: ${found.length} po title filtru`);
+                        found.forEach((t,i)=>{
+                            const isB=isBatchSeason(t.name);
+                            if(i<5)console.log(`[SKT]   [${i}] batch=${isB} "${t.name.slice(0,60)}"`);
+                        });
                         const batch=found.filter(t=>isBatchSeason(t.name));
                         if(batch.length>0)batchTorrents=batch;
                         if(!torrents.length){
