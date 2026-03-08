@@ -699,26 +699,23 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
                         const batch=found.filter(t=>isBatchSeason(t.name));
                         if(!torrents.length&&ep.length>0)torrents=ep;
                         if(batch.length>0)batchTorrents=batch;
-                        // Pokud nic nemá sezónu/epizodu — filtruj: nesmí obsahovat JINOU sezónu
-                        if(!torrents.length&&!batchTorrents.length){
-                            const noSeason=found.filter(t=>{
-                                if(hasAnyEpisode(t.name))return false;
-                                const up=t.name.toUpperCase();
-                                // Pokud torrent obsahuje S[číslo], musí to být naše sezóna
-                                const sMatch=up.match(/S(\d{2})/g);
-                                if(sMatch){
-                                    const hasMy=sMatch.some(s=>s===seTag);
-                                    if(!hasMy)return false; // Obsahuje jinou sezónu (S38) → vyřadit
-                                }
-                                // Pokud obsahuje "[číslo].serie/seria", musí být naše
-                                const czMatch=t.name.match(/(\d+)\s*\.?\s*seri[ea]/i);
-                                if(czMatch&&czMatch[1]!==sn)return false;
-                                return true;
-                            });
-                            if(noSeason.length>0){
-                                batchTorrents=noSeason;
-                                console.log(`[SKT] 📦 ${noSeason.length}x batch (z ${found.length} nalezených)`);
+                        // Torrenty bez sezóny/epizody — přidej jako batch
+                        const noSeason=found.filter(t=>{
+                            if(matchesExactEpisode(t.name)||isBatchSeason(t.name))return false;
+                            if(hasAnyEpisode(t.name))return false;
+                            const up=t.name.toUpperCase();
+                            const sMatch=up.match(/S(\d{2})/g);
+                            if(sMatch){
+                                const hasMy=sMatch.some(s=>s===seTag);
+                                if(!hasMy)return false;
                             }
+                            const czMatch=removeDiacritics(t.name).match(/(\d+)\s*\.?\s*serie/i);
+                            if(czMatch&&czMatch[1]!==sn)return false;
+                            return true;
+                        });
+                        if(noSeason.length>0){
+                            batchTorrents=[...batchTorrents,...noSeason];
+                            console.log(`[SKT] 📦 +${noSeason.length}x batch bez sezóny`);
                         }
                     }
                     await delay(300);
