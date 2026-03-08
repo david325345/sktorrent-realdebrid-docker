@@ -634,7 +634,7 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
             return list.filter(t=>{
                 const yearMatches=t.name.match(/\b(19|20)\d{2}\b/g);
                 if(!yearMatches||yearMatches.length===0)return true; // Nemá rok → projde
-                const ok=yearMatches.some(y=>y===omdbYear);
+                const ok=yearMatches.some(y=>Math.abs(parseInt(y)-parseInt(omdbYear))<=1);
                 if(!ok)console.log(`[SKT] ⏭️ Rok nesedí: "${t.name}" (hledám ${omdbYear})`);
                 return ok;
             });
