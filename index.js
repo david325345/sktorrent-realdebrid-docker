@@ -14,7 +14,7 @@ const langToFlag = { CZ:"🇨🇿",SK:"🇸🇰",EN:"🇬🇧",US:"🇺🇸",DE:
 const VIDEO_EXT = [".mkv",".mp4",".avi",".mov",".wmv",".flv",".webm",".ts",".m4v"];
 function removeDiacritics(s){return s.normalize("NFD").replace(/[\u0300-\u036f]/g,"");}
 function shortenTitle(s,n=3){return s.split(/\s+/).slice(0,n).join(" ");}
-function isMultiSeason(s){return /(S\d{2}E\d{2}-\d{2}|Complete|All Episodes|Season \d+(-\d+)?)/i.test(s);}
+function isMultiSeason(s){return /(S\d{2}E\d{2}-\d{2}|S\d{2}-S\d{2}|Season \d+-\d+)/i.test(s);}
 function isVideo(f){return VIDEO_EXT.some(e=>f.toLowerCase().endsWith(e));}
 
 const resolveCache=new Map();
@@ -607,8 +607,14 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
             // Má sezónu (S01, 1.serie) a nemá epizodu
             const hasSe=up.includes(seTag)||(new RegExp(`(^|\\W)${sn}\\s*\\.?\\s*seri[ea]|seri[ea]\\s*${sn}(\\W|$)`,'i')).test(name);
             if(hasSe&&!hasAnyEpisode(name))return true;
-            // "komplet", "complete" = celá série (batch bez čísla sezóny)
+            // "komplet", "complete" = celá série
             if(/\b(komplet|complete)\b/i.test(name)&&!hasAnyEpisode(name))return true;
+            // Multi-season range (S01-S08) — pokud zahrnuje naši sezónu
+            const rangeMatch=name.match(/S(\d{2})-S(\d{2})/i);
+            if(rangeMatch){
+                const from=parseInt(rangeMatch[1]),to=parseInt(rangeMatch[2]);
+                if(season>=from&&season<=to&&!hasAnyEpisode(name))return true;
+            }
             return false;
         };
 
@@ -630,10 +636,19 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
         // Hledej postupně každý název
         async function searchWithName(name){
             if(sktRateLimited)return;
+            
+            // Ověř že torrent patří k hledanému titulu
+            const titleWords=name.toLowerCase().replace(/[^a-z0-9\s]/g,'').split(/\s+/).filter(w=>w.length>=3);
+            const matchesTitle=(tname)=>{
+                const tn=tname.toLowerCase().replace(/[^a-z0-9\s]/g,' ');
+                // Aspoň 1 klíčové slovo z názvu musí být v torrentu
+                return titleWords.some(w=>tn.includes(w));
+            };
+            
             if(type==='series'&&season!==undefined){
                 // 1. Přesná epizoda
                 if(!torrents.length){
-                    const found=filterYear(await searchSKT(name+' '+epTag,sktUid,sktPass));
+                    const found=filterYear(await searchSKT(name+' '+epTag,sktUid,sktPass)).filter(t=>matchesTitle(t.name));
                     if(found.length>0){
                         const ep=found.filter(t=>matchesExactEpisode(t.name));
                         const batch=found.filter(t=>isBatchSeason(t.name));
@@ -644,7 +659,7 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
                 }
                 // 2. Sezóna batch
                 if(!batchTorrents.length&&!sktRateLimited){
-                    const found=filterYear(await searchSKT(name+' '+seTag,sktUid,sktPass));
+                    const found=filterYear(await searchSKT(name+' '+seTag,sktUid,sktPass)).filter(t=>matchesTitle(t.name));
                     if(found.length>0){
                         const batch=found.filter(t=>isBatchSeason(t.name));
                         if(batch.length>0)batchTorrents=batch;
@@ -657,7 +672,7 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
                 }
                 // 3. Holý název - hledej batch i když máme epizody
                 if(!batchTorrents.length&&!sktRateLimited){
-                    const found=filterYear(await searchSKT(name,sktUid,sktPass));
+                    const found=filterYear(await searchSKT(name,sktUid,sktPass)).filter(t=>matchesTitle(t.name));
                     if(found.length>0){
                         const ep=found.filter(t=>matchesExactEpisode(t.name));
                         const batch=found.filter(t=>isBatchSeason(t.name));
@@ -689,7 +704,7 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
                 }
             } else {
                 if(!torrents.length&&!sktRateLimited){
-                    torrents=filterYear(await searchSKT(name,sktUid,sktPass));
+                    torrents=filterYear(await searchSKT(name,sktUid,sktPass)).filter(t=>matchesTitle(t.name));
                     await delay(300);
                 }
             }
@@ -719,7 +734,7 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
         const streams=[];const seen=new Set();
 
         const addStream=(t,isBatch)=>{
-            if(isMultiSeason(t.name)||seen.has(t.hash))return;seen.add(t.hash);
+            if(seen.has(t.hash))return;seen.add(t.hash);
             const flags=(t.name.match(/\b([A-Z]{2})\b/g)||[]).map(c=>langToFlag[c]).filter(Boolean);
             const flagStr=flags.length?` ${flags.join("/")}`:"";
             let clean=t.name.replace(/^Stiahni si\s*/i,"").trim();
