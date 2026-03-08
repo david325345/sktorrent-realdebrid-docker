@@ -652,18 +652,29 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
             
             // Ověř že torrent patří k hledanému titulu (bez S05E03 tagů)
             const cleanName=removeDiacritics(name).replace(/S\d{2}E?\d{0,2}/gi,'').replace(/\d+x\d+/g,'').trim();
-            const titleWords=cleanName.toLowerCase().replace(/[^a-z0-9\s]/g,'').split(/\s+/).filter(w=>w.length>=3);
+            const titleWords=cleanName.toLowerCase().replace(/[^a-z0-9\s]/g,'').split(/\s+/).filter(w=>w.length>=2);
             const matchesTitle=(tname)=>{
                 if(titleWords.length===0)return true;
-                let tn=removeDiacritics(tname).toLowerCase().replace(/[^a-z0-9\s\/\-]/g,' ');
+                let tn=removeDiacritics(tname).toLowerCase().replace(/[^a-z0-9\s\/\-\.]/g,' ');
+                // Odstraň "Stiahni si [kategorie]" prefix
+                tn=tn.replace(/^stiahni si\s+\w+\s+/i,'');
                 // Pro seriály: ořízni název epizody (za " - " po S01E01)
                 const epPos=tn.search(/s\d{2}e\d{2}/i);
                 if(epPos>=0){
                     const dashAfterEp=tn.indexOf(' - ',epPos);
                     if(dashAfterEp>=0)tn=tn.slice(0,dashAfterEp);
                 }
-                const mainWord=titleWords.reduce((a,b)=>a.length>=b.length?a:b,'');
-                return tn.includes(mainWord);
+                // Vezmi jen název (před závorkami, =, CSFD, rokem)
+                const titlePart=tn.split(/[=(]|\bcsfd\b|\b(19|20)\d{2}\b/i)[0].trim();
+                // Rozděl na části podle / 
+                const parts=titlePart.split(/\s*[\/]\s*/);
+                // Aspoň jedna část musí obsahovat VŠECHNA slova z názvu
+                if(titleWords.length>=2){
+                    return parts.some(p=>titleWords.every(w=>p.includes(w)));
+                }
+                // Jednoslovný název — aspoň hlavní slovo v některé části
+                const mainWord=titleWords[0];
+                return parts.some(p=>p.includes(mainWord));
             };
             
             if(type==='series'&&season!==undefined){
