@@ -642,12 +642,11 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
             if(sktRateLimited)return;
             
             // Ověř že torrent patří k hledanému titulu (bez S05E03 tagů)
-            const cleanName=name.replace(/S\d{2}E?\d{0,2}/gi,'').replace(/\d+x\d+/g,'').trim();
+            const cleanName=removeDiacritics(name).replace(/S\d{2}E?\d{0,2}/gi,'').replace(/\d+x\d+/g,'').trim();
             const titleWords=cleanName.toLowerCase().replace(/[^a-z0-9\s]/g,'').split(/\s+/).filter(w=>w.length>=3);
             const matchesTitle=(tname)=>{
                 if(titleWords.length===0)return true;
-                const tn=tname.toLowerCase().replace(/[^a-z0-9\s]/g,' ');
-                // Hledej v první polovině názvu (název seriálu je vždy na začátku)
+                const tn=removeDiacritics(tname).toLowerCase().replace(/[^a-z0-9\s]/g,' ');
                 const firstHalf=tn.slice(0,Math.max(tn.length/2,30));
                 return titleWords.some(w=>firstHalf.includes(w));
             };
