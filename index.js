@@ -83,6 +83,7 @@ async function getTitle(imdbId, tmdbKey){
 
 // ============ SKTORRENT ============
 let sktRateLimited=false;
+const excludedCats=/xXx|Knihy|Časopisy|Ostatní|Game Hall|Audio.*video|Soft.*app|Externe|Hry na Windows|Hry na Konzole/i;
 
 async function searchSKT(query, sktUid, sktPass){
     if(sktRateLimited){console.log(`[SKT] ⏸️ Rate limited, skip "${query}"`);return[];}
@@ -136,7 +137,8 @@ async function searchSKT(query, sktUid, sktPass){
                 results.push({name:link.text().trim(),hash,size:cells.eq(5)?.text().trim()||"?",seeds:parseInt(cells.eq(6)?.text().trim())||0,cat:cells.eq(0)?.text().trim()||""});
             });
         }
-        console.log(`[SKT] Nalezeno: ${results.length}`);return results;
+        const filtered=results.filter(t=>!excludedCats.test(t.cat));
+        console.log(`[SKT] Nalezeno: ${filtered.length}${filtered.length<results.length?' ('+results.length+' před filtrem)':''}`);return filtered;
     }catch(e){
         if(e.response?.status===403){
             console.error("[SKT] ⛔ 403 Rate limit - pausing");
@@ -466,12 +468,7 @@ app.get("/:token/catalog/:type/:id/:extra.json",async(req,res)=>{
     const results=await searchSKT(query,sktUid,sktPass);
     if(!results.length)return res.json({metas:[]});
     
-    // Filtruj nežádoucí kategorie
-    const excludedCats=/xXx|Knihy|Časopisy|Ostatní|Game Hall|Audio.*video|Soft.*app|Externe/i;
-    const filtered=results.filter(t=>!excludedCats.test(t.cat));
-    if(!filtered.length)return res.json({metas:[]});
-    
-    const metas=filtered.map((t,i)=>{
+    const metas=results.map((t,i)=>{
         // Uložit do cache pro meta/stream endpoint
         sktSearchCache.set(t.hash,t);
         
