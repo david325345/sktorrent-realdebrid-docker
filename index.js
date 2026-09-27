@@ -9,7 +9,8 @@ const { searchSKT, getCachedTorrent, sktLogin } = require("./lib/skt");
 const { findTorrents } = require("./lib/search");
 const { PROVIDERS, activeProviders, checkCachedTB, rdVerify, tbVerify } = require("./lib/debrid");
 const { configPage } = require("./lib/html");
-const { isHash, flagsFromName, cleanTorrentName, formatBytes, baseUrl } = require("./lib/util");
+const { isHash, flagsFromName, cleanTorrentName, formatBytes, baseUrl, removeDiacritics } = require("./lib/util");
+const { isMoviePack } = require("./lib/matching");
 
 const PORT = process.env.PORT || 3009;
 const VERSION = "3.0.0";
@@ -97,6 +98,7 @@ app.get("/:token/meta/:type/:id.json",(req,res)=>{
 const playUrl=(req,prov,hash,sel={})=>{
     const b=`${baseUrl(req)}/${req.params.token}/play/${prov}/${hash}`;
     if(sel.fileId!==undefined) return `${b}/f/${sel.fileId}/video.mp4`;
+    if(sel.pack) return `${b}/m/${sel.year||0}/${sel.title||"x"}/video.mp4`;
     if(sel.season!==undefined) return `${b}/e/${sel.season}/${sel.episode}/video.mp4`;
     return `${b}/video.mp4`;
 };
@@ -189,12 +191,16 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
             picked=picked.map((x,i)=>({ ...x, i })).sort((a,b)=>rank(a)-rank(b)||a.i-b.i);
         }
 
-        const sel=isSeries?{ season, episode }:{};
+        // Kolekce filmů: při přehrání se vybere soubor podle roku / názvu (slug v URL)
+        const movieYear=String(titles.year||"").slice(0,4).replace(/\D/g,"");
+        const slug=removeDiacritics(titles.en||titles.title||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,80)||"x";
         const streams=[];
         for(const { t, isBatch } of picked){
             const flags=flagsFromName(t.name);
             const cat=t.cat||"SKT";
-            const label=`${cleanTorrentName(t)}${isBatch?` 📦 ${epTag} z balíku`:""}`;
+            const isPack=!isSeries&&isMoviePack(t.name);
+            const sel=isSeries?{ season, episode }:isPack?{ pack:true, year:movieYear, title:slug }:{};
+            const label=`${cleanTorrentName(t)}${isBatch?` 📦 ${epTag} z balíku`:""}${isPack?" 📦 kolekce":""}`;
             for(const p of provs){
                 const cached=p.id==="tb"?(cachedSet?cachedSet.has(t.hash):null):undefined;
                 streams.push({
@@ -220,7 +226,8 @@ async function handlePlay(req,res,provId,hash,sel){
     const key=p?.key(cfg);
     if(!key) return res.status(400).type("text/plain").send(`Chybí klíč pro ${p?.label||provId}`);
     hash=hash.toLowerCase();
-    console.log(`\n▶️ Play ${p.short}: ${hash} ${sel.fileId!==undefined?`file ${sel.fileId}`:`S${sel.season??"-"}E${sel.episode??"-"}`}`);
+    const what=sel.fileId!==undefined?`file ${sel.fileId}`:sel.pack?`kolekce → ${sel.title} (${sel.year||"?"})`:`S${sel.season??"-"}E${sel.episode??"-"}`;
+    console.log(`\n▶️ Play ${p.short}: ${hash} ${what}`);
     let r;
     try{ r=await p.resolve(key,hash,sel); }
     catch(e){ r={ status:"error", reason:e.message }; }
@@ -236,6 +243,8 @@ async function handlePlay(req,res,provId,hash,sel){
 const H="[a-fA-F0-9]{40}";
 app.get(`/:token/play/:prov(rd|tb)/:hash(${H})/e/:season(\\d+)/:episode(\\d+)/video.mp4`,(req,res)=>
     handlePlay(req,res,req.params.prov,req.params.hash,{ season:parseInt(req.params.season), episode:parseInt(req.params.episode) }));
+app.get(`/:token/play/:prov(rd|tb)/:hash(${H})/m/:year(\\d{1,4})/:title([a-z0-9-]{1,80})/video.mp4`,(req,res)=>
+    handlePlay(req,res,req.params.prov,req.params.hash,{ pack:true, year:req.params.year!=="0"?req.params.year:"", title:req.params.title.replace(/-/g," ") }));
 app.get(`/:token/play/:prov(rd|tb)/:hash(${H})/f/:fileId(\\d+)/video.mp4`,(req,res)=>
     handlePlay(req,res,req.params.prov,req.params.hash,{ fileId:parseInt(req.params.fileId) }));
 app.get(`/:token/play/:prov(rd|tb)/:hash(${H})/video.mp4`,(req,res)=>
