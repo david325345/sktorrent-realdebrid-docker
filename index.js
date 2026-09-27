@@ -107,7 +107,7 @@ async function tbCachedSet(cfg,hashes){
 }
 
 function providerLine(p,cached){
-    if(p.id==="tb") return cached===true?"⚡ TorBox (v cache)":cached===false?"⏳ TorBox (není v cache)":"📦 TorBox";
+    if(p.id==="tb") return cached===true?"⚡ TorBox":cached===false?"⏳ TorBox":"TorBox";
     return "Real-Debrid";   // stav cache u RD se neřeší
 }
 function streamName(p,cat,cached){
