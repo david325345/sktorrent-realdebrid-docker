@@ -9,11 +9,12 @@ const { searchSKT, getCachedTorrent, sktLogin } = require("./lib/skt");
 const { findTorrents } = require("./lib/search");
 const { PROVIDERS, activeProviders, checkCachedTB, rdVerify, tbVerify } = require("./lib/debrid");
 const { configPage } = require("./lib/html");
+const archive = require("./lib/archive");
 const { isHash, flagsFromName, cleanTorrentName, formatBytes, baseUrl, removeDiacritics } = require("./lib/util");
 const { isMoviePack } = require("./lib/matching");
 
 const PORT = process.env.PORT || 3009;
-const VERSION = "3.0.0";
+const VERSION = "3.1.0";
 const MAX_EP_TORRENTS = 12;      // max torrentů s přesnou epizodou / filmů
 const MAX_ALL_TORRENTS = 15;     // max torrentů celkem (včetně balíků)
 
@@ -28,6 +29,7 @@ app.use("/static", express.static(path.join(__dirname,"public"), { maxAge:"7d" }
 const staticUrl = (req,file)=>`${baseUrl(req)}/static/${file}`;
 
 app.get("/health",(req,res)=>res.json({ status:"ok", version:VERSION }));
+archive.registerRoutes(app);   // /admin/hledani + /admin/hledani.jsonl.gz (jen s ADMIN_KEY)
 app.get(["/","/configure"],(req,res)=>res.type("html").send(configPage(null)));
 app.get("/:token/configure",(req,res)=>res.type("html").send(configPage(parseToken(req.params.token))));
 
@@ -76,6 +78,8 @@ app.get("/:token/catalog/:type/:id/:extra.json",async(req,res)=>{
         };
     });
     console.log(`🔍 Catalog: ${metas.length} výsledků`);
+    archive.write({ kind:"catalog", q:query, count:results.length,
+        torrents:results.map(t=>({ n:t.name, cat:t.cat, s:t.size, seeds:t.seeds, h:t.hash })) });
     res.json({ metas });
 });
 
@@ -171,13 +175,32 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
         console.log(`\n🎬 ${type} ${imdbId} S${season??"-"}E${episode??"-"}`);
 
         const titles=await getTitle(imdbId,cfg.tmdbKey,type);
-        if(!titles) return res.json({ streams:[] });
+        if(!titles){
+            archive.write({ kind:"stream", type, id, note:"bez názvu z TMDB/OMDb" });
+            return res.json({ streams:[] });
+        }
 
-        const { torrents, batchTorrents, epTag }=await findTorrents({
+        const found=await findTorrents({
             type, season:isSeries?season:undefined, episode:isSeries?episode:undefined,
             titles, sktUid:cfg.sktUid, sktPass:cfg.sktPass
         });
-        if(!torrents.length&&!batchTorrents.length) return res.json({ streams:[] });
+        const { torrents, batchTorrents, epTag }=found;
+        // Záznam do anonymního archivu (sent = pořadí ve výpisu, tb = v cache TorBoxu)
+        const archiveStream=(sentMap,cachedSet)=>archive.write({
+            kind:"stream", type, id, year:titles.year||null,
+            titles:{ en:titles.en||titles.title||"", cz:titles.cz||"", sk:titles.sk||"" },
+            names:found.names, queries:found.audit.queries, ms:found.ms,
+            providers:provs.map(p=>p.id), logged:!!(cfg.sktUid&&cfg.sktPass),
+            streams:sentMap?sentMap.size:0,
+            torrents:found.audit.torrents.map(({ t, ok, reason })=>{
+                const rec={ n:t.name, cat:t.cat, s:t.size, seeds:t.seeds, h:t.hash, ok, r:reason };
+                if(sentMap?.has(t.hash)) rec.sent=sentMap.get(t.hash);
+                if(!isSeries&&ok&&isMoviePack(t.name)) rec.pack=true;
+                if(cachedSet) rec.tb=cachedSet.has(t.hash);
+                return rec;
+            })
+        });
+        if(!torrents.length&&!batchTorrents.length){ archiveStream(null,null); return res.json({ streams:[] }); }
 
         let picked=[
             ...torrents.slice(0,MAX_EP_TORRENTS).map(t=>({ t, isBatch:false })),
@@ -212,6 +235,7 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
             }
         }
         console.log(`✅ ${streams.length} streamů (${picked.length} torrentů × ${provs.length} služby)`);
+        archiveStream(new Map(picked.map((x,i)=>[x.t.hash,i+1])),cachedSet);
         res.json({ streams });
     }catch(e){
         console.error("[STREAM] Error:",e.message);
@@ -231,6 +255,15 @@ async function handlePlay(req,res,provId,hash,sel){
     let r;
     try{ r=await p.resolve(key,hash,sel); }
     catch(e){ r={ status:"error", reason:e.message }; }
+    // Archiv: jen GET a ne opakované požadavky z cache (přehrávač volá /play víckrát)
+    if(req.method==="GET"&&!r.fromCache){
+        const t=getCachedTorrent(hash);
+        const rec={ kind:"play", prov:p.id, h:hash, n:t?.name||null, sel, status:r.status };
+        if(r.file) rec.file=r.file;
+        if(r.reason) rec.r=r.reason;
+        if(r.videos) rec.videos=r.videos;
+        archive.write(rec);
+    }
     if(r.status==="ready") return res.redirect(302,r.url);
     if(r.status==="downloading"||r.status==="notadded"){
         console.log(`[Play] 🕐 Stahuje se → info video`);
@@ -283,6 +316,9 @@ app.post("/api/skt-login",express.json({ limit:"10kb" }),async(req,res)=>{
 app.use((req,res)=>res.status(404).json({ error:"Not found" }));
 
 if(require.main===module){
-    app.listen(PORT,()=>console.log(`🚀 SKTorrent v${VERSION} http://localhost:${PORT}`));
+    app.listen(PORT,()=>{
+        console.log(`🚀 SKTorrent v${VERSION} http://localhost:${PORT}`);
+        console.log(`📝 Archiv hledání: ${archive.status()}`);
+    });
 }
 module.exports = app;

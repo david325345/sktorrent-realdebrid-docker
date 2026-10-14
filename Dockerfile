@@ -10,6 +10,10 @@ COPY index.js ./
 COPY lib ./lib
 COPY public ./public
 
+# Trvalé úložiště (Coolify Volume Mount → /app/data): anonymní archiv hledání v /app/data/hledani
+RUN mkdir -p /app/data/hledani && chown -R node:node /app/data
+VOLUME /app/data
+
 USER node
 EXPOSE 3009
 
