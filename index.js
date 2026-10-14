@@ -14,7 +14,7 @@ const { isHash, flagsFromName, cleanTorrentName, formatBytes, baseUrl, removeDia
 const { isMoviePack } = require("./lib/matching");
 
 const PORT = process.env.PORT || 3009;
-const VERSION = "3.1.0";
+const VERSION = "3.2.0";
 const MAX_EP_TORRENTS = 12;      // max torrentů s přesnou epizodou / filmů
 const MAX_ALL_TORRENTS = 15;     // max torrentů celkem (včetně balíků)
 
@@ -236,12 +236,27 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
         }
         console.log(`✅ ${streams.length} streamů (${picked.length} torrentů × ${provs.length} služby)`);
         archiveStream(new Map(picked.map((x,i)=>[x.t.hash,i+1])),cachedSet);
+        if(isSeries) prefetchNext(imdbId,type,season,episode,titles,cfg);
         res.json({ streams });
     }catch(e){
         console.error("[STREAM] Error:",e.message);
         res.json({ streams:[] });
     }
 });
+
+// Předhledání dalšího dílu na pozadí: výsledky jdou do paměti (6 h), další díl se pak otevře hned
+const { createCache } = require("./lib/cache");
+const prefetched=createCache({ ttl:6*3600*1000, max:5000 });
+function prefetchNext(imdbId,type,season,episode,titles,cfg){
+    const key=`${cfg.sktUid||"anon"}|${imdbId}:${season}:${episode+1}`;
+    if(prefetched.get(key)) return;
+    prefetched.set(key,true);
+    setImmediate(()=>{
+        console.log(`🔮 Předhledání ${imdbId} S${season}E${episode+1}`);
+        findTorrents({ type, season, episode:episode+1, titles, sktUid:cfg.sktUid, sktPass:cfg.sktPass })
+            .catch(e=>console.error("[Předhledání]",e.message));
+    });
+}
 
 // ============ PLAY ============
 async function handlePlay(req,res,provId,hash,sel){
