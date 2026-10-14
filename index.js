@@ -14,7 +14,7 @@ const { isHash, flagsFromName, cleanTorrentName, formatBytes, baseUrl, removeDia
 const { isMoviePack } = require("./lib/matching");
 
 const PORT = process.env.PORT || 3009;
-const VERSION = "3.2.0";
+const VERSION = "3.2.1";
 const MAX_EP_TORRENTS = 12;      // max torrentů s přesnou epizodou / filmů
 const MAX_ALL_TORRENTS = 15;     // max torrentů celkem (včetně balíků)
 
