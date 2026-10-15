@@ -4,7 +4,7 @@ const path = require("path");
 const express = require("express");
 
 const { parseToken } = require("./lib/config");
-const { getTitle } = require("./lib/meta");
+const { getTitle, titleCacheSize } = require("./lib/meta");
 const { searchSKT, getCachedTorrent, sktLogin } = require("./lib/skt");
 const { findTorrents } = require("./lib/search");
 const { PROVIDERS, activeProviders, checkCachedTB, rdVerify, tbVerify } = require("./lib/debrid");
@@ -14,7 +14,7 @@ const { isHash, flagsFromName, cleanTorrentName, formatBytes, baseUrl, removeDia
 const { isMoviePack } = require("./lib/matching");
 
 const PORT = process.env.PORT || 3009;
-const VERSION = "3.2.1";
+const VERSION = "3.3.0";
 const MAX_EP_TORRENTS = 12;      // max torrentů s přesnou epizodou / filmů
 const MAX_ALL_TORRENTS = 15;     // max torrentů celkem (včetně balíků)
 
@@ -334,6 +334,7 @@ if(require.main===module){
     app.listen(PORT,()=>{
         console.log(`🚀 SKTorrent v${VERSION} http://localhost:${PORT}`);
         console.log(`📝 Archiv hledání: ${archive.status()}`);
+        console.log(`🎬 TMDB cache: ${titleCacheSize()} titulů (data/cache/tmdb.json)`);
     });
 }
 module.exports = app;
