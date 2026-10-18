@@ -10,11 +10,12 @@ const { findTorrents } = require("./lib/search");
 const { PROVIDERS, activeProviders, checkCachedTB, rdVerify, tbVerify } = require("./lib/debrid");
 const { configPage } = require("./lib/html");
 const archive = require("./lib/archive");
+const ghupload = require("./lib/ghupload");
 const { isHash, flagsFromName, cleanTorrentName, formatBytes, baseUrl, removeDiacritics } = require("./lib/util");
 const { isMoviePack } = require("./lib/matching");
 
 const PORT = process.env.PORT || 3009;
-const VERSION = "3.4.0";
+const VERSION = "3.5.0";
 const MAX_EP_TORRENTS = 12;      // max torrentů s přesnou epizodou / filmů
 const MAX_ALL_TORRENTS = 15;     // max torrentů celkem (včetně balíků)
 
@@ -30,6 +31,11 @@ const staticUrl = (req,file)=>`${baseUrl(req)}/static/${file}`;
 
 app.get("/health",(req,res)=>res.json({ status:"ok", version:VERSION }));
 archive.registerRoutes(app);   // /admin/hledani + /admin/hledani.jsonl.gz (jen s ADMIN_KEY)
+// Ruční nahrání archivu na GitHub (jinak samo každých 48 h od 3:00)
+app.get("/admin/github-upload",async(req,res)=>{
+    if(!archive.adminOk(req)) return res.status(404).json({ error:"Not found" });
+    res.json(await ghupload.uploadNow({ force:true }));
+});
 app.get(["/","/configure"],(req,res)=>res.type("html").send(configPage(null)));
 app.get("/:token/configure",(req,res)=>res.type("html").send(configPage(parseToken(req.params.token))));
 
@@ -335,6 +341,8 @@ if(require.main===module){
         console.log(`🚀 SKTorrent v${VERSION} http://localhost:${PORT}`);
         console.log(`📝 Archiv hledání: ${archive.status()}`);
         console.log(`🎬 TMDB cache: ${titleCacheSize()} titulů (data/cache/tmdb.json)`);
+        console.log(`📤 GitHub archiv: ${ghupload.status()}`);
+        ghupload.start();
     });
 }
 module.exports = app;

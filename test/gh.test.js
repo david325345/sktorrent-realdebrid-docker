@@ -1,0 +1,30 @@
+const P = process.argv[2] || require("path").join(__dirname, "..");
+const axios=require(P+"/node_modules/axios"), zlib=require("zlib"), fs=require("fs");
+const puts=[]; let mode="ok";
+axios.defaults.adapter=async(cfg)=>{
+  const body=cfg.data?JSON.parse(cfg.data):null;
+  const res=(status,data)=>{ if(status>=400){ const e=new Error("HTTP "+status); e.response={status,data}; throw e; } return {status,data,statusText:"OK",headers:{},config:cfg,request:{}}; };
+  if(mode==="401") return res(401,{message:"Bad credentials"});
+  const file=cfg.url.split("/contents/")[1];
+  if(mode==="exists"&&!/_\d{4}\.jsonl\.gz$/.test(file)) return res(422,{message:"sha wasn't supplied"});
+  puts.push({file,auth:cfg.headers.Authorization,msg:body.message,lines:zlib.gunzipSync(Buffer.from(body.content,"base64")).toString().trim().split("\n")});
+  return res(201,{content:{path:file}});
+};
+const archive=require(P+"/lib/archive"), gh=require(P+"/lib/ghupload");
+const logs=[]; const ol=console.log; console.log=(...a)=>{logs.push(a.join(" ")); if(process.env.VERBOSE) ol(...a);};
+let fail=0; const eq=(n,ok)=>{ if(!ok) fail++; ol(`${ok?"OK  ":"FAIL"} ${n}`); };
+(async()=>{
+  archive.write({kind:"stream",id:"tt1"}); archive.write({kind:"stream",id:"tt2"});
+  await new Promise(r=>setTimeout(r,200));
+  let r=await gh.uploadNow({force:true});
+  eq("první nahrání: 2 záznamy do sktorrent/hledani/<den>.jsonl.gz", r.ok&&r.records===2&&/^sktorrent\/hledani\/\d{4}-\d{2}-\d{2}\.jsonl\.gz$/.test(puts[0]?.file)&&puts[0].lines.length===2);
+  r=await gh.uploadNow({force:true}); eq("opakovaně bez nových dat nic nenahraje", r.ok&&r.records===0&&puts.length===1);
+  r=await gh.uploadNow(); eq("bez force se do 48 h nenahrává", !r.ok&&/48/.test(r.reason));
+  archive.write({kind:"play",id:"tt3"}); await new Promise(r=>setTimeout(r,200));
+  mode="exists"; r=await gh.uploadNow({force:true}); eq("soubor existuje → nový název s časem, jen nový záznam", r.ok&&/_\d{4}\.jsonl\.gz$/.test(r.file)&&puts.at(-1).lines.length===1&&JSON.parse(puts.at(-1).lines[0]).id==="tt3");
+  archive.write({kind:"play",id:"tt4"}); await new Promise(r=>setTimeout(r,200));
+  mode="401"; r=await gh.uploadNow({force:true}); eq("špatný token → srozumitelná chyba", !r.ok&&/401/.test(r.reason));
+  mode="ok"; r=await gh.uploadNow({force:true}); eq("po chybě se nahraje i nenahraný záznam", r.ok&&puts.at(-1).lines.some(l=>l.includes('"tt4"')));
+  eq("token se neobjeví v logu", !logs.some(l=>l.includes(process.env.GH_ARCHIVE_TOKEN)));
+  ol(fail?`\n${fail} FAIL`:"\nVŠE OK"); process.exit(fail?1:0);
+})();
