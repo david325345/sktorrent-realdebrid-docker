@@ -8,13 +8,14 @@ const { ALLOWED } = require(path.join(root, "lib/search"));
 /** Verdikt jednoho torrentu pro záznam typu „stream“: { ok, r } */
 function makeJudge(rec){
     const ti=rec.titles||{};
-    const all=[ti.en,ti.cz,ti.sk];
+    const all=[ti.en,ti.cz,ti.sk,...(ti.alt||[])];
     const strict=M.makeStrictTitleMatcher(all);
     const base=M.makeStrictTitleMatcher(all.filter(Boolean).map(n=>n.replace(/(^|\s)\d{1,2}(?=\s|$)/g," ").trim()));
     const [, s, e]=String(rec.id||"").split(":");
     const f=s?M.episodeFilters(+s,+e):null;
     const year=rec.type==="movie"?String(rec.year||"").slice(0,4):"";
     const allowed=ALLOWED[rec.type==="series"?"series":"movie"];
+    const tooOld=f?M.makeSeriesYearCheck(rec.year,all):()=>null;
     return (t)=>{
         if(t.cat&&!allowed.test(t.cat)) return { ok:false, r:`kategorie mimo (${t.cat})` };
         if(!f){
@@ -23,6 +24,8 @@ function makeJudge(rec){
             return { ok:true, r:M.isMoviePack(t.n)?"kolekce":"film" };
         }
         if(!strict(t.n,t.cat)) return { ok:false, r:"název nesedí" };
+        const old=tooOld(t.n);
+        if(old) return { ok:false, r:old };
         if(f.matchesExactEpisode(t.n)) return { ok:true, r:"epizoda" };
         if(f.isBatchSeason(t.n)) return { ok:true, r:"balík" };
         if(f.isNoSeasonCandidate(t.n)&&strict(t.n,t.cat,{ whole:true })) return { ok:true, r:"balík (bez sezóny?)" };

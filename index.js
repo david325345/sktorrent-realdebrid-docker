@@ -15,7 +15,7 @@ const { isHash, flagsFromName, cleanTorrentName, formatBytes, baseUrl, removeDia
 const { isMoviePack } = require("./lib/matching");
 
 const PORT = process.env.PORT || 3009;
-const VERSION = "3.5.0";
+const VERSION = "3.5.1";
 const MAX_EP_TORRENTS = 12;      // max torrentů s přesnou epizodou / filmů
 const MAX_ALL_TORRENTS = 15;     // max torrentů celkem (včetně balíků)
 
@@ -194,7 +194,7 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
         // Záznam do anonymního archivu (sent = pořadí ve výpisu, tb = v cache TorBoxu)
         const archiveStream=(sentMap,cachedSet)=>archive.write({
             kind:"stream", type, id, year:titles.year||null,
-            titles:{ en:titles.en||titles.title||"", cz:titles.cz||"", sk:titles.sk||"" },
+            titles:{ en:titles.en||titles.title||"", cz:titles.cz||"", sk:titles.sk||"", ...(titles.alt?.length?{ alt:titles.alt }:{}) },
             names:found.names, queries:found.audit.queries, ms:found.ms,
             providers:provs.map(p=>p.id), logged:!!(cfg.sktUid&&cfg.sktPass),
             streams:sentMap?sentMap.size:0,
