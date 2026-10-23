@@ -13,9 +13,13 @@ const archive = require("./lib/archive");
 const ghupload = require("./lib/ghupload");
 const { isHash, flagsFromName, cleanTorrentName, formatBytes, baseUrl, removeDiacritics } = require("./lib/util");
 const { isMoviePack } = require("./lib/matching");
+const { orderPicked, isDead, accountNote } = require("./lib/streams");
+
+// Promise s časovým limitem (po limitu null; původní volání doběhne na pozadí)
+const withTimeout=(promise,ms)=>Promise.race([promise,new Promise(r=>setTimeout(()=>r(null),ms).unref?.())]);
 
 const PORT = process.env.PORT || 3009;
-const VERSION = "3.5.1";
+const VERSION = "3.5.2";
 const MAX_EP_TORRENTS = 12;      // max torrentů s přesnou epizodou / filmů
 const MAX_ALL_TORRENTS = 15;     // max torrentů celkem (včetně balíků)
 
@@ -193,7 +197,7 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
         const { torrents, batchTorrents, epTag }=found;
         // Záznam do anonymního archivu (sent = pořadí ve výpisu, tb = v cache TorBoxu)
         const archiveStream=(sentMap,cachedSet)=>archive.write({
-            kind:"stream", type, id, year:titles.year||null,
+            kind:"stream", type, id, year:titles.year||null, ...(found.seasonYear?{ seasonYear:found.seasonYear }:{}),
             titles:{ en:titles.en||titles.title||"", cz:titles.cz||"", sk:titles.sk||"", ...(titles.alt?.length?{ alt:titles.alt }:{}) },
             names:found.names, queries:found.audit.queries, ms:found.ms,
             providers:provs.map(p=>p.id), logged:!!(cfg.sktUid&&cfg.sktPass),
@@ -213,12 +217,14 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
             ...batchTorrents.map(t=>({ t, isBatch:true }))
         ].slice(0,MAX_ALL_TORRENTS);
 
-        const cachedSet=await tbCachedSet(cfg,picked.map(x=>x.t.hash));
-        // S TorBoxem: v rámci epizod i balíků napřed torrenty z cache TorBoxu
-        if(cachedSet){
-            const rank=(x)=>(x.isBatch?2:0)+(cachedSet.has(x.t.hash)?0:1);
-            picked=picked.map((x,i)=>({ ...x, i })).sort((a,b)=>rank(a)-rank(b)||a.i-b.i);
-        }
+        const hashes=picked.map(x=>x.t.hash);
+        // Cache TorBoxu + stav torrentů, které už jsou v účtu (nejvýš 2,5 s — popisek není důležitější než rychlost)
+        const [cachedSet,accounts]=await Promise.all([
+            tbCachedSet(cfg,hashes),
+            Promise.all(provs.map(p=>withTimeout(p.accountStatus(p.key(cfg),hashes),2500).catch(()=>null)))
+        ]);
+        // Epizody před balíky, v rámci nich napřed z cache TorBoxu; torrenty s 0 seedery mimo cache na konec
+        picked=orderPicked(picked,cachedSet);
 
         // Kolekce filmů: při přehrání se vybere soubor podle roku / názvu (slug v URL)
         const movieYear=String(titles.year||"").slice(0,4).replace(/\D/g,"");
@@ -230,11 +236,13 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
             const isPack=!isSeries&&isMoviePack(t.name);
             const sel=isSeries?{ season, episode }:isPack?{ pack:true, year:movieYear, title:slug }:{};
             const label=`${cleanTorrentName(t)}${isBatch?` 📦 ${epTag} z balíku`:""}${isPack?" 📦 kolekce":""}`;
-            for(const p of provs){
+            for(const [pi,p] of provs.entries()){
                 const cached=p.id==="tb"?(cachedSet?cachedSet.has(t.hash):null):undefined;
+                const note=accountNote(accounts[pi]?.get(t.hash),p.label);
+                const dead=!note&&isDead(t,cached)?"\n⚠️ 0 seedů a není v cache — stažení je nepravděpodobné":"";
                 streams.push({
                     name:streamName(p,cat,cached),
-                    description:`${label}\n👤 ${t.seeds}  📀 ${t.size}${flags?"  "+flags:""}\n${providerLine(p,cached)}`,
+                    description:`${label}\n👤 ${t.seeds}  📀 ${t.size}${flags?"  "+flags:""}\n${providerLine(p,cached)}${note?"\n"+note:""}${dead}`,
                     url:playUrl(req,p.id,t.hash,sel),
                     behaviorHints:{ bingeGroup:`skt-${p.id}-${t.hash.slice(0,8)}`, notWebReady:true }
                 });
@@ -282,6 +290,7 @@ async function handlePlay(req,res,provId,hash,sel){
         const rec={ kind:"play", prov:p.id, h:hash, n:t?.name||null, sel, status:r.status };
         if(r.file) rec.file=r.file;
         if(r.reason) rec.r=r.reason;
+        if(r.status==="downloading"){ rec.progress=r.progress||0; if(r.state) rec.state=r.state; if(r.since) rec.since=r.since; }
         if(r.videos) rec.videos=r.videos;
         archive.write(rec);
     }

@@ -45,7 +45,7 @@ function analyze(recs){
     L.push(`## Přehled`, ``,
         `- Období: ${from||"-"} – ${to||"-"} UTC`,
         `- Hledání: ${streams.length} (filmy ${streams.filter(r=>r.type==="movie").length}, epizody ${streams.filter(r=>r.type==="series").length}), s výsledkem ${withRes.length}, bez výsledku ${streams.length-withRes.length}`,
-        `- Přehrání: ${plays.length} (chyb ${plays.filter(p=>p.status==="error").length}), katalog: ${catalogs.length}`,
+        `- Přehrání: ${plays.length} (chyb ${plays.filter(p=>p.status==="error").length}, stahuje se ${plays.filter(p=>p.status==="downloading").length}), katalog: ${catalogs.length}`,
         `- Doba hledání: medián ${quant(ms,0.5)} ms, p90 ${quant(ms,0.9)} ms, max ${ms.length?Math.max(...ms):0} ms`, ``);
 
     // 1) Bez výsledku — seskupeno podle titulu/epizody; zvlášť „SKT nic nevrátilo“ a „vše odmítnuto“
@@ -83,7 +83,11 @@ function analyze(recs){
         let judge=null; try{ judge=makeJudge(r); }catch(e){}
         for(const t of r.torrents||[]){
             if(t.ok||!/^název nesedí|^nesedí sezóna/.test(t.r||"")) continue;
-            if(judge&&judge(t).ok) continue;            // aktuální logika už ho přijímá (viz změny verdiktu níž)
+            if(judge){
+                // aktuální logika ho už přijímá (viz změny verdiktu níž), nebo ho odmítá z jiného důvodu (jiná sezóna…)
+                const now=judge(t);
+                if(now.ok||!/^název nesedí|^nesedí sezóna/.test(now.r||"")) continue;
+            }
             const parts=stripCat(t).split(/\s\/\s|\|/);
             const hit=parts.find(p=>{ const n2=norm(p); return names.some(n=>n2===n||n2.startsWith(n+" ")); });
             if(!hit) continue;
@@ -146,6 +150,25 @@ function analyze(recs){
         L.push(``);
     }
 
+    // 4b) Opakované „stahuje se“ — stejný torrent ≥ 3× bez úspěchu (mrtvý torrent, uživatel zkouší pořád znovu)
+    const dl=new Map();
+    for(const p of plays){
+        if(!p.h) continue;
+        const g=dl.get(p.h)||{ p, n:0, ok:false, first:p.t, last:p.t, prog:[], state:null };
+        if(p.status==="downloading"){ g.n++; g.last=p.t; if(p.progress!==undefined) g.prog.push(p.progress); if(p.state) g.state=p.state; g.p=p; }
+        if(p.status==="ready") g.ok=true;
+        dl.set(p.h,g);
+    }
+    const stuck=[...dl.values()].filter(g=>g.n>=3&&!g.ok).sort((a,b)=>b.n-a.n);
+    L.push(`## Opakované „stahuje se“ (${stuck.length})`, ``,
+        `Torrent přehrávaný aspoň 3× a pokaždé jen ve stahování (nikdy ready) — nejspíš mrtvý torrent bez seedů.`, ``);
+    if(!stuck.length) L.push(`Žádné.`, ``);
+    else{
+        L.push(`| Torrent | Služba | × | Od – do (UTC) | Průběh | Stav |`, `|---|---|---|---|---|---|`);
+        for(const g of stuck.slice(0,LIMIT)) L.push(`| ${esc(clean(g.p.n||g.p.h).slice(0,90))} | ${g.p.prov} | ${g.n} | ${String(g.first).slice(5,16).replace("T"," ")} – ${String(g.last).slice(5,16).replace("T"," ")} | ${g.prog.length?`${g.prog[0]} → ${g.prog.at(-1)} %`:"?"} | ${esc(g.state||"?")} |`);
+        L.push(``);
+    }
+
     // 5) Pomalá hledání
     const slow=streams.filter(r=>r.ms>4000).sort((a,b)=>b.ms-a.ms);
     L.push(`## Pomalá hledání > 4 s (${slow.length})`, ``);
@@ -173,7 +196,7 @@ function analyze(recs){
         if(uniq.length>LIMIT) L.push(``, `… a dalších ${uniq.length-LIMIT}.`);
         L.push(``);
     }
-    return { markdown:L.join("\n"), counts:{ streams:streams.length, none:none.length, noneRejected:rejected.length, susp:suspN, loose:loose.length, playErrors:bad.length, slow:slow.length, replay:ch.length } };
+    return { markdown:L.join("\n"), counts:{ streams:streams.length, none:none.length, noneRejected:rejected.length, susp:suspN, loose:loose.length, playErrors:bad.length, stuck:stuck.length, slow:slow.length, replay:ch.length } };
 }
 
 module.exports = { readRecords, analyze };

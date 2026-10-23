@@ -9,13 +9,14 @@ const { ALLOWED } = require(path.join(root, "lib/search"));
 function makeJudge(rec){
     const ti=rec.titles||{};
     const all=[ti.en,ti.cz,ti.sk,...(ti.alt||[])];
-    const strict=M.makeStrictTitleMatcher(all);
+    const strict=M.makeStrictTitleMatcher(all,{ colonNeedsYear:rec.type==="movie" });
     const base=M.makeStrictTitleMatcher(all.filter(Boolean).map(n=>n.replace(/(^|\s)\d{1,2}(?=\s|$)/g," ").trim()));
     const [, s, e]=String(rec.id||"").split(":");
     const f=s?M.episodeFilters(+s,+e):null;
     const year=rec.type==="movie"?String(rec.year||"").slice(0,4):"";
     const allowed=ALLOWED[rec.type==="series"?"series":"movie"];
     const tooOld=f?M.makeSeriesYearCheck(rec.year,all):()=>null;
+    const beforeSeason=f?M.makeSeasonYearCheck(rec.seasonYear,+s,all):()=>null;     // seasonYear v archivu od 3.5.2
     return (t)=>{
         if(t.cat&&!allowed.test(t.cat)) return { ok:false, r:`kategorie mimo (${t.cat})` };
         if(!f){
@@ -28,7 +29,10 @@ function makeJudge(rec){
         if(old) return { ok:false, r:old };
         if(f.matchesExactEpisode(t.n)) return { ok:true, r:"epizoda" };
         if(f.isBatchSeason(t.n)) return { ok:true, r:"balík" };
-        if(f.isNoSeasonCandidate(t.n)&&strict(t.n,t.cat,{ whole:true })) return { ok:true, r:"balík (bez sezóny?)" };
+        if(f.isNoSeasonCandidate(t.n)&&strict(t.n,t.cat,{ whole:true })){
+            const before=beforeSeason(t.n);
+            return before?{ ok:false, r:before }:{ ok:true, r:"balík (bez sezóny?)" };
+        }
         return { ok:false, r:f.rejectReason(t.n) };
     };
 }
