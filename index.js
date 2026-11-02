@@ -11,15 +11,16 @@ const { PROVIDERS, activeProviders, checkCachedTB, rdVerify, tbVerify } = requir
 const { configPage } = require("./lib/html");
 const archive = require("./lib/archive");
 const ghupload = require("./lib/ghupload");
-const { isHash, flagsFromName, cleanTorrentName, formatBytes, baseUrl, removeDiacritics } = require("./lib/util");
-const { isMoviePack } = require("./lib/matching");
+const { isHash, flagsFromName, cleanTorrentName, formatBytes, baseUrl, removeDiacritics, keyId } = require("./lib/util");
+const { isMoviePack, selKey, makeForeignTitleCheck, makeYearMatch } = require("./lib/matching");
 const { orderPicked, isDead, accountNote } = require("./lib/streams");
+const { createCache } = require("./lib/cache");
 
 // Promise s časovým limitem (po limitu null; původní volání doběhne na pozadí)
 const withTimeout=(promise,ms)=>Promise.race([promise,new Promise(r=>setTimeout(()=>r(null),ms).unref?.())]);
 
 const PORT = process.env.PORT || 3009;
-const VERSION = "3.5.2";
+const VERSION = "3.6.0";
 const MAX_EP_TORRENTS = 12;      // max torrentů s přesnou epizodou / filmů
 const MAX_ALL_TORRENTS = 15;     // max torrentů celkem (včetně balíků)
 
@@ -151,8 +152,11 @@ async function sktDirectStreams(req,cfg,hash){
                 behaviorHints:{ notWebReady:true, bingeGroup:`skt-${p.id}-${hash.slice(0,8)}` },
                 thumbnail:thumb
             }));
-        }else if(r.status==="downloading"||r.status==="notadded"){
-            const txt=r.status==="notadded"?"⏳ Není v cache — po kliknutí se začne stahovat":`🕐 Torrent se stahuje${r.progress?` (${r.progress} %)`:""}…\nZkuste za chvíli znovu.`;
+        }else if(r.status==="downloading"||r.status==="notadded"||r.status==="queued"||r.status==="limit"){
+            const txt=r.status==="notadded"?"⏳ Není v cache — po kliknutí se začne stahovat"
+                :r.status==="queued"?"⏳ Ve frontě TorBoxu (plné sloty stahování)\nZkuste za chvíli znovu."
+                :r.status==="limit"?`⏸️ ${r.reason}\nZkuste za chvíli znovu.`
+                :`🕐 Torrent se stahuje${r.progress?` (${r.progress} %)`:""}…\nZkuste za chvíli znovu.`;
             out.push({ name:streamName(p,cat,cached), description:`${txt}\n${providerLine(p,cached)}`, url:playUrl(req,p.id,hash), behaviorHints:{ notWebReady:true }, thumbnail:thumb });
         }else{
             console.log(`[SKT ${p.short}] ❌ ${r.reason}`);
@@ -200,6 +204,7 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
             kind:"stream", type, id, year:titles.year||null, ...(found.seasonYear?{ seasonYear:found.seasonYear }:{}),
             titles:{ en:titles.en||titles.title||"", cz:titles.cz||"", sk:titles.sk||"", ...(titles.alt?.length?{ alt:titles.alt }:{}) },
             names:found.names, queries:found.audit.queries, ms:found.ms,
+            ...(found.sktDown?{ sktDown:true }:{}), ...(found.queuedMs?{ queuedMs:found.queuedMs }:{}),
             providers:provs.map(p=>p.id), logged:!!(cfg.sktUid&&cfg.sktPass),
             streams:sentMap?sentMap.size:0,
             torrents:found.audit.torrents.map(({ t, ok, reason })=>{
@@ -210,7 +215,17 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
                 return rec;
             })
         });
-        if(!torrents.length&&!batchTorrents.length){ archiveStream(null,null); return res.json({ streams:[] }); }
+        if(!torrents.length&&!batchTorrents.length){
+            archiveStream(null,null);
+            // SKT neodpovídá: místo prázdného výpisu (= „titul na SKT není“) jedna informační položka
+            if(found.sktDown) return res.json({ streams:[{
+                name:"SKTorrent\n⚠️ nedostupný",
+                description:"⚠️ SKTorrent teď neodpovídá — výsledky nejde načíst.\nZkuste to znovu za chvíli.",
+                url:staticUrl(req,"skt-nedostupne.mp4"),
+                behaviorHints:{ notWebReady:true, bingeGroup:"skt-nedostupne" }
+            }], cacheMaxAge:0 });
+            return res.json({ streams:[] });
+        }
 
         let picked=[
             ...torrents.slice(0,MAX_EP_TORRENTS).map(t=>({ t, isBatch:false })),
@@ -224,7 +239,9 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
             Promise.all(provs.map(p=>withTimeout(p.accountStatus(p.key(cfg),hashes),2500).catch(()=>null)))
         ]);
         // Epizody před balíky, v rámci nich napřed z cache TorBoxu; torrenty s 0 seedery mimo cache na konec
-        picked=orderPicked(picked,cachedSet);
+        // U seriálů navíc: možná cizí seriál stejného jména (Most / Bron pro MOST!) až za ostatní, sedící rok napřed
+        const ourNames=[titles.en,titles.title,titles.original,titles.cz,titles.sk,...(titles.all||[]),...(titles.alt||[])];
+        picked=orderPicked(picked,cachedSet,isSeries?{ uncertain:makeForeignTitleCheck(ourNames), yearOk:makeYearMatch(found.seasonYear||titles.year) }:{});
 
         // Kolekce filmů: při přehrání se vybere soubor podle roku / názvu (slug v URL)
         const movieYear=String(titles.year||"").slice(0,4).replace(/\D/g,"");
@@ -259,7 +276,6 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
 });
 
 // Předhledání dalšího dílu na pozadí: výsledky jdou do paměti (6 h), další díl se pak otevře hned
-const { createCache } = require("./lib/cache");
 const prefetched=createCache({ ttl:6*3600*1000, max:5000 });
 function prefetchNext(imdbId,type,season,episode,titles,cfg){
     const key=`${cfg.sktUid||"anon"}|${imdbId}:${season}:${episode+1}`;
@@ -267,12 +283,18 @@ function prefetchNext(imdbId,type,season,episode,titles,cfg){
     prefetched.set(key,true);
     setImmediate(()=>{
         console.log(`🔮 Předhledání ${imdbId} S${season}E${episode+1}`);
-        findTorrents({ type, season, episode:episode+1, titles, sktUid:cfg.sktUid, sktPass:cfg.sktPass })
+        findTorrents({ type, season, episode:episode+1, titles, sktUid:cfg.sktUid, sktPass:cfg.sktPass, background:true })
+            .then(r=>{ if(!r){ prefetched.delete(key); console.log(`🔮 Předhledání ${imdbId} S${season}E${episode+1} vynecháno (moc souběžných hledání)`); } })
             .catch(e=>console.error("[Předhledání]",e.message));
     });
 }
 
 // ============ PLAY ============
+// Krátká paměť výsledku přehrání (chyba / fronta / limit): přehrávač po neúspěchu opakuje každé ~2 s —
+// opakování v téhle době nevolají API služby a nezapisují se znovu do archivu.
+const playMemo=createCache({ ttl:90*1000, max:5000 });
+const PLAY_MEMO=new Set(["error","queued","limit"]);
+
 async function handlePlay(req,res,provId,hash,sel){
     const cfg=parseToken(req.params.token);
     const p=PROVIDERS[provId];
@@ -281,9 +303,14 @@ async function handlePlay(req,res,provId,hash,sel){
     hash=hash.toLowerCase();
     const what=sel.fileId!==undefined?`file ${sel.fileId}`:sel.pack?`kolekce → ${sel.title} (${sel.year||"?"})`:`S${sel.season??"-"}E${sel.episode??"-"}`;
     console.log(`\n▶️ Play ${p.short}: ${hash} ${what}`);
-    let r;
-    try{ r=await p.resolve(key,hash,sel); }
-    catch(e){ r={ status:"error", reason:e.message }; }
+    const mk=`${p.id}:${keyId(key)}:${hash}:${selKey(sel)}`;
+    let r=playMemo.get(mk);
+    if(r){ r={ ...r, fromCache:true, memo:true }; console.log(`[Play] 💾 ${r.status} z paměti (${r.reason||""})`); }
+    else{
+        try{ r=await p.resolve(key,hash,sel); }
+        catch(e){ r={ status:"error", reason:e.message }; }
+        if(PLAY_MEMO.has(r.status)) playMemo.set(mk,{ status:r.status, reason:r.reason, videos:r.videos });
+    }
     // Archiv: jen GET a ne opakované požadavky z cache (přehrávač volá /play víckrát)
     if(req.method==="GET"&&!r.fromCache){
         const t=getCachedTorrent(hash);
@@ -299,7 +326,11 @@ async function handlePlay(req,res,provId,hash,sel){
         console.log(`[Play] 🕐 Stahuje se → info video`);
         return res.redirect(302,staticUrl(req,"downloading.mp4"));
     }
-    console.log(`[Play] ❌ ${r.reason}`);
+    if(r.status==="queued"||r.status==="limit"){
+        if(!r.memo) console.log(`[Play] ⏳ ${r.reason} → info video`);
+        return res.redirect(302,staticUrl(req,"fronta.mp4"));
+    }
+    if(!r.memo) console.log(`[Play] ❌ ${r.reason}`);
     return res.status(502).type("text/plain").send(`Chyba: ${r.reason}`);
 }
 
