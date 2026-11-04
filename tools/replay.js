@@ -9,9 +9,17 @@ const { ALLOWED } = require(path.join(root, "lib/search"));
 function makeJudge(rec){
     const ti=rec.titles||{};
     const all=[ti.en,ti.cz,ti.sk,...(ti.alt||[])];
-    const strict=M.makeStrictTitleMatcher(all,{ colonNeedsYear:rec.type==="movie" });
+    const strictRaw=M.makeStrictTitleMatcher(all,{ colonNeedsYear:rec.type==="movie" });
+    // Tituly csfd: — ČSFD ID z detailu torrentu (pole csfd v archivu) má přednost před názvem
+    const idParts=String(rec.id||"").split(":");
+    const isCsfd=idParts[0]==="csfd";
+    const ourCsfd=isCsfd?+idParts[1]:null;
+    const csfdOf=new Map((rec.torrents||[]).filter(t=>ourCsfd&&t.csfd!==undefined).map(t=>[t.n,t.csfd]));
+    const csfdState=(n)=>{ if(!csfdOf.has(n)||csfdOf.get(n)===null) return null; return csfdOf.get(n)===ourCsfd?"match":"other"; };
+    const strict=(n,cat,o)=>{ const st=csfdState(n); return st==="match"?true:st==="other"?false:strictRaw(n,cat,o); };
+    const nameReason=(n)=>csfdState(n)==="other"?`jiné ČSFD (${csfdOf.get(n)})`:"název nesedí";
     const base=M.makeStrictTitleMatcher(all.filter(Boolean).map(n=>n.replace(/(^|\s)\d{1,2}(?=\s|$)/g," ").trim()));
-    const [, s, e]=String(rec.id||"").split(":");
+    const [s, e]=isCsfd?idParts.slice(2):idParts.slice(1);
     const f=s?M.episodeFilters(+s,+e):null;
     const year=rec.type==="movie"?String(rec.year||"").slice(0,4):"";
     const allowed=ALLOWED[rec.type==="series"?"series":"movie"];
@@ -20,12 +28,12 @@ function makeJudge(rec){
     return (t)=>{
         if(t.cat&&!allowed.test(t.cat)) return { ok:false, r:`kategorie mimo (${t.cat})` };
         if(!f){
-            if(!M.filterYear([{ name:t.n }],year).length) return { ok:false, r:"rok nesedí" };
-            if(!(strict(t.n,t.cat)||(M.isMoviePack(t.n)&&base(t.n,t.cat)))) return { ok:false, r:"název nesedí" };
+            if(csfdState(t.n)!=="match"&&!M.filterYear([{ name:t.n }],year).length) return { ok:false, r:"rok nesedí" };
+            if(!(strict(t.n,t.cat)||(M.isMoviePack(t.n)&&base(t.n,t.cat)))) return { ok:false, r:nameReason(t.n) };
             return { ok:true, r:M.isMoviePack(t.n)?"kolekce":"film" };
         }
-        if(!strict(t.n,t.cat)) return { ok:false, r:"název nesedí" };
-        const old=tooOld(t.n);
+        if(!strict(t.n,t.cat)) return { ok:false, r:nameReason(t.n) };
+        const old=csfdState(t.n)==="match"?null:tooOld(t.n);
         if(old) return { ok:false, r:old };
         if(f.matchesExactEpisode(t.n)) return { ok:true, r:"epizoda" };
         if(f.isBatchSeason(t.n)) return { ok:true, r:"balík" };

@@ -5,6 +5,7 @@ const express = require("express");
 
 const { parseToken } = require("./lib/config");
 const { getTitle, titleCacheSize } = require("./lib/meta");
+const { parseCsfdId, getCsfdTitle } = require("./lib/csfd");
 const { searchSKT, getCachedTorrent, sktLogin } = require("./lib/skt");
 const { findTorrents } = require("./lib/search");
 const { PROVIDERS, activeProviders, checkCachedTB, rdVerify, tbVerify } = require("./lib/debrid");
@@ -20,7 +21,7 @@ const { createCache } = require("./lib/cache");
 const withTimeout=(promise,ms)=>Promise.race([promise,new Promise(r=>setTimeout(()=>r(null),ms).unref?.())]);
 
 const PORT = process.env.PORT || 3009;
-const VERSION = "3.6.0";
+const VERSION = "3.7.0";
 const MAX_EP_TORRENTS = 12;      // max torrentů s přesnou epizodou / filmů
 const MAX_ALL_TORRENTS = 15;     // max torrentů celkem (včetně balíků)
 
@@ -50,12 +51,14 @@ app.get("/:token/manifest.json",(req,res)=>{
     const provs=activeProviders(cfg);
     const suffix=provs.length?provs.map(p=>p.short).join("+"):"RD";
     const catalogs=cfg.sktSearch?[{ type:"movie", id:"skt-search", name:"SKTorrent", extra:[{ name:"search", isRequired:true }] }]:[];
+    // csfd: = tituly jen na ČSFD (katalog/metadata z csfd-ratings), streamy hledá tento addon
+    const streamPrefixes=cfg.sktSearch?["tt","csfd:","skt"]:["tt","csfd:"];
     const resources=cfg.sktSearch?[
-        { name:"stream", types:["movie","series"], idPrefixes:["tt","skt"] },
+        { name:"stream", types:["movie","series"], idPrefixes:streamPrefixes },
         { name:"catalog", types:["movie"], idPrefixes:["skt"] },
         { name:"meta", types:["movie"], idPrefixes:["skt"] }
     ]:[
-        { name:"stream", types:["movie","series"], idPrefixes:["tt"] }
+        { name:"stream", types:["movie","series"], idPrefixes:streamPrefixes }
     ];
     res.json({
         id:"org.stremio.sktorrent.rd",   // beze změny, ať není nutná reinstalace
@@ -64,6 +67,7 @@ app.get("/:token/manifest.json",(req,res)=>{
         description:"CZ/SK torrenty ze sktorrent.eu přes Real-Debrid a/nebo TorBox",
         logo:staticUrl(req,"logo.png"),
         types:["movie","series"],
+        idPrefixes:streamPrefixes,
         catalogs, resources,
         behaviorHints:{ configurable:true, configurationRequired:provs.length===0 }
     });
@@ -181,16 +185,25 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
             return res.json({ streams:await sktDirectStreams(req,cfg,hash) });
         }
 
-        const [imdbId,sRaw,eRaw]=id.split(":");
-        if(!/^tt\d+$/.test(imdbId)) return res.json({ streams:[] });
-        const season=sRaw!==undefined?parseInt(sRaw):undefined;
-        const episode=eRaw!==undefined?parseInt(eRaw):undefined;
+        // IMDb „tt123:S:E“ (názvy z TMDB) nebo jen ČSFD „csfd:123:S:E“ (názvy z csfd-ratings, číslování dílů podle ČSFD)
+        let imdbId, season, episode, csfd=null;
+        if(id.startsWith("csfd:")){
+            csfd=parseCsfdId(id);
+            if(!csfd) return res.json({ streams:[] });
+            imdbId=`csfd:${csfd.csfdId}`; season=csfd.season; episode=csfd.episode;
+        }else{
+            const [iid,sRaw,eRaw]=id.split(":");
+            if(!/^tt\d+$/.test(iid)) return res.json({ streams:[] });
+            imdbId=iid;
+            season=sRaw!==undefined?parseInt(sRaw):undefined;
+            episode=eRaw!==undefined?parseInt(eRaw):undefined;
+        }
         const isSeries=type==="series"&&Number.isInteger(season)&&Number.isInteger(episode);
         console.log(`\n🎬 ${type} ${imdbId} S${season??"-"}E${episode??"-"}`);
 
-        const titles=await getTitle(imdbId,cfg.tmdbKey,type);
+        const titles=csfd?await getCsfdTitle(type,csfd.csfdId):await getTitle(imdbId,cfg.tmdbKey,type);
         if(!titles){
-            archive.write({ kind:"stream", type, id, note:"bez názvu z TMDB/OMDb" });
+            archive.write({ kind:"stream", type, id, note:csfd?"bez názvu z csfd-ratings":"bez názvu z TMDB/OMDb" });
             return res.json({ streams:[] });
         }
 
@@ -209,6 +222,8 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
             streams:sentMap?sentMap.size:0,
             torrents:found.audit.torrents.map(({ t, ok, reason })=>{
                 const rec={ n:t.name, cat:t.cat, s:t.size, seeds:t.seeds, h:t.hash, ok, r:reason };
+                // Tituly csfd: — ČSFD ID z detailu torrentu (null = bez odkazu); chybí = detail se nestahoval
+                if(found.csfdOf?.has(t.hash)) rec.csfd=found.csfdOf.get(t.hash);
                 if(sentMap?.has(t.hash)) rec.sent=sentMap.get(t.hash);
                 if(!isSeries&&ok&&isMoviePack(t.name)) rec.pack=true;
                 if(cachedSet) rec.tb=cachedSet.has(t.hash);

@@ -205,6 +205,27 @@ function analyze(recs){
         L.push(``);
     }
 
+    // 4c) Tituly jen na ČSFD (csfd:) — ověření přes ČSFD odkaz v detailu torrentu
+    const csfdRecs=streams.filter(r=>String(r.id||"").startsWith("csfd:"));
+    L.push(`## Tituly jen na ČSFD (${csfdRecs.length} hledání)`, ``);
+    if(!csfdRecs.length) L.push(`Žádné.`, ``);
+    else{
+        L.push(`Detail torrentu: ✔ ČSFD sedí / ✘ jiné ČSFD / – bez odkazu (detail nestažený se nepočítá).`, ``,
+            `| Titul | Výsledek | Detaily ✔ / ✘ / – | Přijato jen díky ČSFD | Vyřazeno kvůli jinému ČSFD |`, `|---|---|---|---|---|`);
+        for(const r of csfdRecs.slice(0,LIMIT)){
+            const our=+String(r.id).split(":")[1];
+            const ts=(r.torrents||[]).filter(t=>t.csfd!==undefined);
+            const ok=ts.filter(t=>t.csfd===our), other=ts.filter(t=>t.csfd!==null&&t.csfd!==our), none=ts.filter(t=>t.csfd===null);
+            // přijato díky ČSFD = ČSFD sedí, ale název by sám neprošel (porovná se s přísnou kontrolou bez ČSFD)
+            const M=require("../lib/matching");
+            const ti=r.titles||{}; const strict=M.makeStrictTitleMatcher([ti.en,ti.cz,ti.sk,...(ti.alt||[])]);
+            const rescued=ok.filter(t=>t.ok&&!strict(t.n,t.cat)).length;
+            const dropped=other.filter(t=>strict(t.n,t.cat)).length;
+            L.push(`| ${esc(what(r))} | ${(r.torrents||[]).filter(t=>t.ok).length} přijato | ${ok.length} / ${other.length} / ${none.length} | ${rescued} | ${dropped} |`);
+        }
+        L.push(``);
+    }
+
     // 5) Pomalá hledání
     const slow=streams.filter(r=>r.ms>4000).sort((a,b)=>b.ms-a.ms);
     L.push(`## Pomalá hledání > 4 s (${slow.length})`, ``);
