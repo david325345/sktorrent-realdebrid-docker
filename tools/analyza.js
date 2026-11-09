@@ -186,22 +186,29 @@ function analyze(recs){
         L.push(``);
     }
 
-    // 4b) Opakované „stahuje se“ — stejný torrent ≥ 3× bez úspěchu (mrtvý torrent, uživatel zkouší pořád znovu)
+    // 4b) Opakované „stahuje se“ — stejný torrent ve ≥ 3 samostatných pokusech bez úspěchu (mrtvý torrent, uživatel
+    //     zkouší pořád znovu). Pokus = dávka záznamů; nový pokus až po pauze ≥ 5 min (opakování přehrávače se slučují).
+    const ATTEMPT_GAP=5*60000;
     const dl=new Map();
     for(const p of plays){
         if(!p.h) continue;
-        const g=dl.get(p.h)||{ p, n:0, ok:false, first:p.t, last:p.t, prog:[], state:null };
-        if(p.status==="downloading"){ g.n++; g.last=p.t; if(p.progress!==undefined) g.prog.push(p.progress); if(p.state) g.state=p.state; g.p=p; }
+        const g=dl.get(p.h)||{ p, n:0, rec:0, lastMs:0, ok:false, first:p.t, last:p.t, prog:[], state:null };
+        if(p.status==="downloading"){
+            const ms=Date.parse(p.t)||0;
+            if(!g.rec||ms-g.lastMs>=ATTEMPT_GAP) g.n++;
+            g.rec++; g.lastMs=ms; g.last=p.t;
+            if(p.progress!==undefined) g.prog.push(p.progress); if(p.state) g.state=p.state; g.p=p;
+        }
         if(p.status==="ready") g.ok=true;
         dl.set(p.h,g);
     }
     const stuck=[...dl.values()].filter(g=>g.n>=3&&!g.ok).sort((a,b)=>b.n-a.n);
     L.push(`## Opakované „stahuje se“ (${stuck.length})`, ``,
-        `Torrent přehrávaný aspoň 3× a pokaždé jen ve stahování (nikdy ready) — nejspíš mrtvý torrent bez seedů.`, ``);
+        `Torrent přehrávaný aspoň ve 3 samostatných pokusech (pauza ≥ 5 min) a pokaždé jen ve stahování (nikdy ready) — nejspíš mrtvý torrent bez seedů.`, ``);
     if(!stuck.length) L.push(`Žádné.`, ``);
     else{
-        L.push(`| Torrent | Služba | × | Od – do (UTC) | Průběh | Stav |`, `|---|---|---|---|---|---|`);
-        for(const g of stuck.slice(0,LIMIT)) L.push(`| ${esc(clean(g.p.n||g.p.h).slice(0,90))} | ${g.p.prov} | ${g.n} | ${String(g.first).slice(5,16).replace("T"," ")} – ${String(g.last).slice(5,16).replace("T"," ")} | ${g.prog.length?`${g.prog[0]} → ${g.prog.at(-1)} %`:"?"} | ${esc(g.state||"?")} |`);
+        L.push(`| Torrent | Služba | Pokusů (záznamů) | Od – do (UTC) | Průběh | Stav |`, `|---|---|---|---|---|---|`);
+        for(const g of stuck.slice(0,LIMIT)) L.push(`| ${esc(clean(g.p.n||g.p.h).slice(0,90))} | ${g.p.prov} | ${g.n} (${g.rec}) | ${String(g.first).slice(5,16).replace("T"," ")} – ${String(g.last).slice(5,16).replace("T"," ")} | ${g.prog.length?`${g.prog[0]} → ${g.prog.at(-1)} %`:"?"} | ${esc(g.state||"?")} |`);
         L.push(``);
     }
 

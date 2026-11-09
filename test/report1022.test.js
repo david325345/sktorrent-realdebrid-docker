@@ -118,7 +118,7 @@ const { analyze } = require(P + "/tools/analyza");
     { t: "2026-10-21T18:40:00Z", kind: "stream", type: "series", id: "tt0903747:1:1", titles: { en: "Breaking Bad", cz: "Perníkový táta", sk: "" }, ms: 900, queries: [],
       torrents: [{ n: "Stiahni si Seriál Perníkový táta / Breaking Bad Série 5 (2012)(CZ/EN)[1080p]", cat: "Seriál", h: "f".repeat(40), ok: false, r: "nesedí sezóna/epizoda" }] }];
   const an = analyze(recs);
-  eq("analyza: mrtvý torrent v oddílu „stahuje se“", [an.counts.stuck, /Zmizeli \/ Gone .* \| tb \| 3 \|.*0 → 0 %.*stalled/.test(an.markdown)], [1, true]);
+  eq("analyza: mrtvý torrent v oddílu „stahuje se“", [an.counts.stuck, /Zmizeli \/ Gone .* \| tb \| 3 \(3\) \|.*0 → 0 %.*stalled/.test(an.markdown)], [1, true]);
   eq("analyza: „Série 5“ už není podezřelé odmítnutí", an.counts.susp, 0);
 
   console.log(fail ? `\n${fail} FAIL` : "\nVŠE OK"); process.exit(fail ? 1 : 0);

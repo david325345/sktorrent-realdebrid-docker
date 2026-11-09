@@ -8,8 +8,8 @@ const { ALLOWED } = require(path.join(root, "lib/search"));
 /** Verdikt jednoho torrentu pro záznam typu „stream“: { ok, r } */
 function makeJudge(rec){
     const ti=rec.titles||{};
-    const all=[ti.en,ti.cz,ti.sk,...(ti.alt||[])];
-    const strictRaw=M.makeStrictTitleMatcher(all,{ colonNeedsYear:rec.type==="movie" });
+    const all=[ti.en,ti.cz,ti.sk,...(ti.alt||[]),...(M.dashShortNames?M.dashShortNames([ti.en,ti.cz]):[])];
+    const strictRaw=M.makeStrictTitleMatcher(all,{ colonNeedsYear:rec.type==="movie", filmYear:rec.type==="movie"?String(rec.year||"").slice(0,4):null });
     // Tituly csfd: — ČSFD ID z detailu torrentu (pole csfd v archivu) má přednost před názvem
     const idParts=String(rec.id||"").split(":");
     const isCsfd=idParts[0]==="csfd";
@@ -24,7 +24,8 @@ function makeJudge(rec){
     const year=rec.type==="movie"?String(rec.year||"").slice(0,4):"";
     const allowed=ALLOWED[rec.type==="series"?"series":"movie"];
     const tooOld=f?M.makeSeriesYearCheck(rec.year,all):()=>null;
-    const beforeSeason=f?M.makeSeasonYearCheck(rec.seasonYear,+s,all):()=>null;     // seasonYear v archivu od 3.5.2
+    // seasonYear v archivu od 3.5.2, seasonAfter (sezóna novější než TMDB zná) od 3.8.0
+    const beforeSeason=f?M.makeSeasonYearCheck(rec.seasonYear,+s,all,{ lastKnownYear:rec.seasonAfter }):()=>null;
     return (t)=>{
         if(t.cat&&!allowed.test(t.cat)) return { ok:false, r:`kategorie mimo (${t.cat})` };
         if(!f){

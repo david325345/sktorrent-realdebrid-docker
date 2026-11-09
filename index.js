@@ -21,7 +21,7 @@ const { createCache } = require("./lib/cache");
 const withTimeout=(promise,ms)=>Promise.race([promise,new Promise(r=>setTimeout(()=>r(null),ms).unref?.())]);
 
 const PORT = process.env.PORT || 3009;
-const VERSION = "3.7.0";
+const VERSION = "3.8.0";
 const MAX_EP_TORRENTS = 12;      // max torrentů s přesnou epizodou / filmů
 const MAX_ALL_TORRENTS = 15;     // max torrentů celkem (včetně balíků)
 
@@ -214,7 +214,7 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
         const { torrents, batchTorrents, epTag }=found;
         // Záznam do anonymního archivu (sent = pořadí ve výpisu, tb = v cache TorBoxu)
         const archiveStream=(sentMap,cachedSet)=>archive.write({
-            kind:"stream", type, id, year:titles.year||null, ...(found.seasonYear?{ seasonYear:found.seasonYear }:{}),
+            kind:"stream", type, id, year:titles.year||null, ...(found.seasonYear?{ seasonYear:found.seasonYear }:{}), ...(found.seasonAfter?{ seasonAfter:found.seasonAfter }:{}),
             titles:{ en:titles.en||titles.title||"", cz:titles.cz||"", sk:titles.sk||"", ...(titles.alt?.length?{ alt:titles.alt }:{}) },
             names:found.names, queries:found.audit.queries, ms:found.ms,
             ...(found.sktDown?{ sktDown:true }:{}), ...(found.queuedMs?{ queuedMs:found.queuedMs }:{}),
@@ -305,10 +305,11 @@ function prefetchNext(imdbId,type,season,episode,titles,cfg){
 }
 
 // ============ PLAY ============
-// Krátká paměť výsledku přehrání (chyba / fronta / limit): přehrávač po neúspěchu opakuje každé ~2 s —
-// opakování v téhle době nevolají API služby a nezapisují se znovu do archivu.
+// Krátká paměť výsledku přehrání (chyba / fronta / limit 90 s, stahuje se 25 s): přehrávač po neúspěchu
+// opakuje každé ~2 s — opakování v téhle době nevolají API služby a nezapisují se znovu do archivu.
 const playMemo=createCache({ ttl:90*1000, max:5000 });
 const PLAY_MEMO=new Set(["error","queued","limit"]);
+const PLAY_MEMO_DOWNLOADING_MS=25*1000;
 
 async function handlePlay(req,res,provId,hash,sel){
     const cfg=parseToken(req.params.token);
@@ -325,6 +326,7 @@ async function handlePlay(req,res,provId,hash,sel){
         try{ r=await p.resolve(key,hash,sel); }
         catch(e){ r={ status:"error", reason:e.message }; }
         if(PLAY_MEMO.has(r.status)) playMemo.set(mk,{ status:r.status, reason:r.reason, videos:r.videos });
+        else if(r.status==="downloading") playMemo.set(mk,{ status:r.status, progress:r.progress, state:r.state },PLAY_MEMO_DOWNLOADING_MS);
     }
     // Archiv: jen GET a ne opakované požadavky z cache (přehrávač volá /play víckrát)
     if(req.method==="GET"&&!r.fromCache){
@@ -338,7 +340,7 @@ async function handlePlay(req,res,provId,hash,sel){
     }
     if(r.status==="ready") return res.redirect(302,r.url);
     if(r.status==="downloading"||r.status==="notadded"){
-        console.log(`[Play] 🕐 Stahuje se → info video`);
+        if(!r.memo) console.log(`[Play] 🕐 Stahuje se → info video`);
         return res.redirect(302,staticUrl(req,"downloading.mp4"));
     }
     if(r.status==="queued"||r.status==="limit"){
