@@ -8,16 +8,17 @@ const { ALLOWED } = require(path.join(root, "lib/search"));
 /** Verdikt jednoho torrentu pro záznam typu „stream“: { ok, r } */
 function makeJudge(rec){
     const ti=rec.titles||{};
-    const all=[ti.en,ti.cz,ti.sk,...(ti.alt||[]),...(M.dashShortNames?M.dashShortNames([ti.en,ti.cz]):[])];
+    const all=[ti.en,ti.cz,ti.sk,...(ti.alt||[]),...(M.dashShortNames?M.dashShortNames([ti.en,ti.cz]):[]),...(ti.csfdTitle?[ti.csfdTitle]:[])];
     const strictRaw=M.makeStrictTitleMatcher(all,{ colonNeedsYear:rec.type==="movie", filmYear:rec.type==="movie"?String(rec.year||"").slice(0,4):null });
     // Tituly csfd: — ČSFD ID z detailu torrentu (pole csfd v archivu) má přednost před názvem
     const idParts=String(rec.id||"").split(":");
     const isCsfd=idParts[0]==="csfd";
-    const ourCsfd=isCsfd?+idParts[1]:null;
+    // csfd: tituly — ČSFD rozhoduje oběma směry; IMDb tituly se známým ČSFD ID (od 3.9.0) — jen záchrana
+    const ourCsfd=isCsfd?+idParts[1]:(ti.csfdId?+ti.csfdId:null);
     const csfdOf=new Map((rec.torrents||[]).filter(t=>ourCsfd&&t.csfd!==undefined).map(t=>[t.n,t.csfd]));
     const csfdState=(n)=>{ if(!csfdOf.has(n)||csfdOf.get(n)===null) return null; return csfdOf.get(n)===ourCsfd?"match":"other"; };
-    const strict=(n,cat,o)=>{ const st=csfdState(n); return st==="match"?true:st==="other"?false:strictRaw(n,cat,o); };
-    const nameReason=(n)=>csfdState(n)==="other"?`jiné ČSFD (${csfdOf.get(n)})`:"název nesedí";
+    const strict=(n,cat,o)=>{ const st=csfdState(n); return st==="match"?true:(st==="other"&&isCsfd)?false:strictRaw(n,cat,o); };
+    const nameReason=(n)=>isCsfd&&csfdState(n)==="other"?`jiné ČSFD (${csfdOf.get(n)})`:"název nesedí";
     const base=M.makeStrictTitleMatcher(all.filter(Boolean).map(n=>n.replace(/(^|\s)\d{1,2}(?=\s|$)/g," ").trim()));
     const [s, e]=isCsfd?idParts.slice(2):idParts.slice(1);
     const f=s?M.episodeFilters(+s,+e):null;

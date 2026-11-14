@@ -5,7 +5,7 @@ const express = require("express");
 
 const { parseToken } = require("./lib/config");
 const { getTitle, titleCacheSize } = require("./lib/meta");
-const { parseCsfdId, getCsfdTitle } = require("./lib/csfd");
+const { parseCsfdId, getCsfdTitle, getCsfdForImdb } = require("./lib/csfd");
 const { searchSKT, getCachedTorrent, sktLogin } = require("./lib/skt");
 const { findTorrents } = require("./lib/search");
 const { PROVIDERS, activeProviders, checkCachedTB, rdVerify, tbVerify } = require("./lib/debrid");
@@ -21,7 +21,7 @@ const { createCache } = require("./lib/cache");
 const withTimeout=(promise,ms)=>Promise.race([promise,new Promise(r=>setTimeout(()=>r(null),ms).unref?.())]);
 
 const PORT = process.env.PORT || 3009;
-const VERSION = "3.8.0";
+const VERSION = "3.9.0";
 const MAX_EP_TORRENTS = 12;      // max torrentů s přesnou epizodou / filmů
 const MAX_ALL_TORRENTS = 15;     // max torrentů celkem (včetně balíků)
 
@@ -201,7 +201,13 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
         const isSeries=type==="series"&&Number.isInteger(season)&&Number.isInteger(episode);
         console.log(`\n🎬 ${type} ${imdbId} S${season??"-"}E${episode??"-"}`);
 
-        const titles=csfd?await getCsfdTitle(type,csfd.csfdId):await getTitle(imdbId,cfg.tmdbKey,type);
+        // IMDb tituly: souběžně s TMDB i ČSFD ID a český název z ČSFD (nejvýš 3 s, jinak až příště)
+        let titles;
+        if(csfd) titles=await getCsfdTitle(type,csfd.csfdId);
+        else{
+            const [tm,cs]=await Promise.all([getTitle(imdbId,cfg.tmdbKey,type),getCsfdForImdb(imdbId,type)]);
+            titles=tm&&cs?{ ...tm, csfdId:cs.csfdId, csfdTitle:cs.title }:tm;
+        }
         if(!titles){
             archive.write({ kind:"stream", type, id, note:csfd?"bez názvu z csfd-ratings":"bez názvu z TMDB/OMDb" });
             return res.json({ streams:[] });
@@ -215,7 +221,8 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
         // Záznam do anonymního archivu (sent = pořadí ve výpisu, tb = v cache TorBoxu)
         const archiveStream=(sentMap,cachedSet)=>archive.write({
             kind:"stream", type, id, year:titles.year||null, ...(found.seasonYear?{ seasonYear:found.seasonYear }:{}), ...(found.seasonAfter?{ seasonAfter:found.seasonAfter }:{}),
-            titles:{ en:titles.en||titles.title||"", cz:titles.cz||"", sk:titles.sk||"", ...(titles.alt?.length?{ alt:titles.alt }:{}) },
+            titles:{ en:titles.en||titles.title||"", cz:titles.cz||"", sk:titles.sk||"", ...(titles.alt?.length?{ alt:titles.alt }:{}),
+                ...(titles.csfdTitle?{ csfdTitle:titles.csfdTitle }:{}), ...(!csfd&&titles.csfdId?{ csfdId:titles.csfdId }:{}) },
             names:found.names, queries:found.audit.queries, ms:found.ms,
             ...(found.sktDown?{ sktDown:true }:{}), ...(found.queuedMs?{ queuedMs:found.queuedMs }:{}),
             providers:provs.map(p=>p.id), logged:!!(cfg.sktUid&&cfg.sktPass),
