@@ -21,7 +21,7 @@ const { createCache } = require("./lib/cache");
 const withTimeout=(promise,ms)=>Promise.race([promise,new Promise(r=>setTimeout(()=>r(null),ms).unref?.())]);
 
 const PORT = process.env.PORT || 3009;
-const VERSION = "3.9.0";
+const VERSION = "3.9.1";
 const MAX_EP_TORRENTS = 12;      // max torrentů s přesnou epizodou / filmů
 const MAX_ALL_TORRENTS = 15;     // max torrentů celkem (včetně balíků)
 

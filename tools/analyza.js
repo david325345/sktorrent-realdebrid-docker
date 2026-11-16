@@ -193,18 +193,21 @@ function analyze(recs){
     for(const p of plays){
         if(!p.h) continue;
         const g=dl.get(p.h)||{ p, n:0, rec:0, lastMs:0, ok:false, first:p.t, last:p.t, prog:[], state:null };
-        if(p.status==="downloading"){
+        // „ve frontě“ (TorBox plné sloty) se počítá stejně — torrent, který dny nevyjde z fronty, je taky zaseknutý
+        if(p.status==="downloading"||p.status==="queued"){
             const ms=Date.parse(p.t)||0;
             if(!g.rec||ms-g.lastMs>=ATTEMPT_GAP) g.n++;
             g.rec++; g.lastMs=ms; g.last=p.t;
-            if(p.progress!==undefined) g.prog.push(p.progress); if(p.state) g.state=p.state; g.p=p;
+            if(p.progress!==undefined) g.prog.push(p.progress);
+            if(p.state) g.state=p.state; else if(p.status==="queued") g.state="ve frontě";
+            g.p=p;
         }
         if(p.status==="ready") g.ok=true;
         dl.set(p.h,g);
     }
     const stuck=[...dl.values()].filter(g=>g.n>=3&&!g.ok).sort((a,b)=>b.n-a.n);
-    L.push(`## Opakované „stahuje se“ (${stuck.length})`, ``,
-        `Torrent přehrávaný aspoň ve 3 samostatných pokusech (pauza ≥ 5 min) a pokaždé jen ve stahování (nikdy ready) — nejspíš mrtvý torrent bez seedů.`, ``);
+    L.push(`## Opakované „stahuje se“ / „ve frontě“ (${stuck.length})`, ``,
+        `Torrent přehrávaný aspoň ve 3 samostatných pokusech (pauza ≥ 5 min) a pokaždé jen ve stahování nebo ve frontě služby (nikdy ready) — nejspíš mrtvý torrent bez seedů, nebo frontu blokuje jiné mrtvé stahování v účtu.`, ``);
     if(!stuck.length) L.push(`Žádné.`, ``);
     else{
         L.push(`| Torrent | Služba | Pokusů (záznamů) | Od – do (UTC) | Průběh | Stav |`, `|---|---|---|---|---|---|`);
@@ -238,13 +241,15 @@ function analyze(recs){
     L.push(`## Pomalá hledání > 4 s (${slow.length})`, ``);
     if(!slow.length) L.push(`Žádná.`, ``);
     else{
-        // Čekání: na volné místo mezi hledáními (queuedMs) a nejdelší čekání dotazu na spojení k SKT (wait); chyby SKT
-        L.push(`| Titul | ms | Dotazů | Čekání (fronta / spojení) | Chyby SKT |`, `|---|---|---|---|---|`);
+        // Čekání: na volné místo mezi hledáními (queuedMs), nejdelší čekání dotazu na spojení k SKT (wait)
+        // a na zkušební dotaz jističe (probeWait, od 3.9.1); chyby SKT
+        L.push(`| Titul | ms | Dotazů | Čekání (fronta / spojení / jistič) | Chyby SKT |`, `|---|---|---|---|---|`);
         for(const r of slow.slice(0,20)){
             const qs=r.queries||[];
             const w=Math.max(0,...qs.map(q=>q.wait||0));
+            const pw=Math.max(0,...qs.map(q=>q.probeWait||0));
             const errs=qs.filter(q=>q.err).length;
-            L.push(`| ${esc(what(r))} | ${r.ms} | ${qs.length} | ${r.queuedMs?`${r.queuedMs} ms`:"-"} / ${w?`${w} ms`:"-"} | ${errs||"-"} |`);
+            L.push(`| ${esc(what(r))} | ${r.ms} | ${qs.length} | ${r.queuedMs?`${r.queuedMs} ms`:"-"} / ${w?`${w} ms`:"-"} / ${pw?`${pw} ms`:"-"} | ${errs||"-"} |`);
         }
         L.push(``);
     }
