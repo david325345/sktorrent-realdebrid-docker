@@ -56,7 +56,15 @@ function analyze(recs){
         ||((r.queries||[]).length>0&&(r.queries||[]).every(q=>q.ms==="cache"&&!q.n)&&(r.ms||0)>=9500);
     const down=none.filter(isDown);
     const downGroups=new Map();
-    for(const r of down){ const g=downGroups.get(r.id)||{ r, n:0, errs:{} }; g.n++; for(const q of r.queries||[]) if(q.err) g.errs[q.err]=(g.errs[q.err]||0)+1; downGroups.set(r.id,g); }
+    const downKinds={}, downMsgs={};
+    for(const r of down){
+        const g=downGroups.get(r.id)||{ r, n:0, errs:{} }; g.n++;
+        for(const q of r.queries||[]) if(q.err){
+            g.errs[q.err]=(g.errs[q.err]||0)+1; downKinds[q.err]=(downKinds[q.err]||0)+1;
+            if(q.msg&&!downMsgs[q.err]) downMsgs[q.err]=q.msg;
+        }
+        downGroups.set(r.id,g);
+    }
     const groups=new Map();
     for(const r of none.filter(r=>!isDown(r))){ const g=groups.get(r.id)||{ r, n:0, raw:0 }; g.n++; g.r=r; g.raw=Math.max(g.raw,(r.torrents||[]).length); groups.set(r.id,g); }
     const rejected=[...groups.values()].filter(g=>g.raw>0), empty=[...groups.values()].filter(g=>g.raw===0);
@@ -66,6 +74,9 @@ function analyze(recs){
     else{
         const t0=down[0].t, t1=down.at(-1).t;
         L.push(`Období: ${String(t0).slice(5,16).replace("T"," ")} – ${String(t1).slice(5,16).replace("T"," ")} UTC`, ``);
+        // Druhy chyb (od 3.9.2 i HTTP status a zpráva: „http 429“, „http 404“…)
+        const kinds=Object.entries(downKinds).sort((a,b)=>b[1]-a[1]);
+        if(kinds.length) L.push(`Druhy chyb: ${kinds.map(([k,v])=>`${esc(k)} ×${v}${downMsgs[k]?` („${esc(downMsgs[k])}“)`:""}`).join(", ")}`, ``);
         for(const { r, n, errs } of [...downGroups.values()].slice(0,LIMIT)){
             const e=Object.entries(errs).map(([k,v])=>`${k} ×${v}`).join(", ")||"odhad (bez pole err)";
             L.push(`- ${esc(what(r))}${n>1?` ×${n}`:""} — ${esc(e)}, ${r.ms} ms`);

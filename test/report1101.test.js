@@ -67,7 +67,10 @@ const tbm = require(P + "/lib/tb");
   eq("Conan: spin-off „Zero's Tea Time“ neprojde", conan("Stiahni si Seriál Detektiv Conan - Zero v jednom / Detective Conan: Zero's Tea Time S01 (CZ)[WebRip][1080p]", "Seriál"), false);
   eq("Conan: běžné balíky projdou", [conan("Seriál Detektiv Conan / Detective Conan S01 (CZ)", "Seriál"), conan("Seriál Detektiv Conan - 1. série (CZ)", "Seriál")], [true, true]);
   const jojoName = "Seriál JoJova prazvlastni dobrodruzstvi / JoJo's Bizarre Adventure - Phantom Blood-Battle Tendency (S01)";
-  eq("JoJo projde (CZ kus celý i jen EN název)", [M.makeStrictTitleMatcher(["JoJo's Bizarre Adventure", "JoJova prazvláštní dobrodružství"])(jojoName, "Seriál"), M.makeStrictTitleMatcher(["JoJo's Bizarre Adventure"])(jojoName, "Seriál")], [true, true]);
+  // Od 3.9.2 (report 2026-11-17): „náš název - podtitul / cizí název“ už neprojde (Saint Seiya - Knights of the
+  // Zodiac / Rytiri zverokruhu = remake). JoJo jen s EN názvem vypadá stejně, proto bez CZ názvu neprojde;
+  // skutečné JoJo má z TMDB i CZ název a projde celým CZ kusem.
+  eq("JoJo projde s CZ názvem; jen s EN názvem ne (jako Saint Seiya)", [M.makeStrictTitleMatcher(["JoJo's Bizarre Adventure", "JoJova prazvláštní dobrodružství"])(jojoName, "Seriál"), M.makeStrictTitleMatcher(["JoJo's Bizarre Adventure"])(jojoName, "Seriál")], [true, false]);
   eq("Kill la Kill - 1. serie + OVA projde", M.makeStrictTitleMatcher(["Kill la Kill"])("Seriál Kill la Kill - 1. serie + OVA", "Seriál"), true);
   eq("Arcane balíky projdou (s alt i bez)", [M.makeStrictTitleMatcher(["Arcane", "Arcane: League of Legends"])("Arcane - League of Legends (S1-S2)(2021-2024)(CZ)", "Seriál"), M.makeStrictTitleMatcher(["Arcane"])("Arcane / Arcane: League of Legends (Season 1 & 2)", "Seriál")], [true, true]);
   eq("latinský zbytek: jen když jím název začíná",

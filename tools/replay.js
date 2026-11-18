@@ -26,11 +26,12 @@ function makeJudge(rec){
     const allowed=ALLOWED[rec.type==="series"?"series":"movie"];
     const tooOld=f?M.makeSeriesYearCheck(rec.year,all):()=>null;
     // seasonYear v archivu od 3.5.2, seasonAfter (sezóna novější než TMDB zná) od 3.8.0
-    const beforeSeason=f?M.makeSeasonYearCheck(rec.seasonYear,+s,all,{ lastKnownYear:rec.seasonAfter }):()=>null;
+    const beforeSeason=f?M.makeSeasonYearCheck(rec.seasonYear,+s,all,{ lastKnownYear:rec.seasonAfter, seriesYear:rec.year }):()=>null;
     return (t)=>{
         if(t.cat&&!allowed.test(t.cat)) return { ok:false, r:`kategorie mimo (${t.cat})` };
         if(!f){
             if(csfdState(t.n)!=="match"&&!M.filterYear([{ name:t.n }],year).length) return { ok:false, r:"rok nesedí" };
+            if(M.isMakingOf&&M.isMakingOf(t.n,all)) return { ok:false, r:"dokument o filmu" };
             if(!(strict(t.n,t.cat)||(M.isMoviePack(t.n)&&base(t.n,t.cat)))) return { ok:false, r:nameReason(t.n) };
             return { ok:true, r:M.isMoviePack(t.n)?"kolekce":"film" };
         }
