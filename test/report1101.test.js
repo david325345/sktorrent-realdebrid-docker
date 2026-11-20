@@ -137,10 +137,12 @@ const tbm = require(P + "/lib/tb");
   let f = await findTorrents({ type: "series", season: 1, episode: 1, titles });
   const sktCalls = () => calls.filter(c => /sktorrent/.test(c));
   eq("timeout SKT: sktDown + chyba v dotazech", [f.sktDown, f.audit.queries.every(q => q.err === "timeout" || q.err === "jistič")], [true, true]);
-  eq("timeout SKT: další názvy („Show“) se nezkouší", sktCalls().some(c => / Show( |$)/.test(c)), false);
+  // Od 3.9.3 jde nejdřív jen holý název (varianty S01E01 / S01 / seri až při plné stránce) a po 2 chybách po sobě konec
+  eq("timeout SKT: jen holé názvy, po 2 chybách další dotazy nejdou", [sktCalls().length, sktCalls().some(c => /S01/.test(c))], [2, false]);
+  f = await findTorrents({ type: "series", season: 1, episode: 2, titles });
   eq("po 3 timeoutech je jistič otevřený", skt.breakerOpen(), true);
   calls.length = 0;
-  f = await findTorrents({ type: "series", season: 1, episode: 2, titles });
+  f = await findTorrents({ type: "series", season: 1, episode: 3, titles });
   eq("otevřený jistič: žádný dotaz na SKT, hledání skončí hned", [sktCalls().length, f.sktDown, f.audit.queries[0].err, f.ms < 200], [0, true, "jistič", true]);
 
   // Informační položka ve výpisu místo prázdného výsledku
@@ -160,7 +162,7 @@ const tbm = require(P + "/lib/tb");
   f = await findTorrents({ type: "series", season: 1, episode: 3, titles });
   const took = Date.now() - t0;
   eq("SKT visí: hledání skončí do rozpočtu + rezervy", [took <= 3400, f.sktDown], [true, true]);
-  await sleep(50);
+  await sleep(2100);      // dotaz spuštěný těsně před koncem rozpočtu se zruší nejpozději po tvrdém limitu (2 s)
   eq("visící dotazy jsou zrušené (nic neběží)", sktInflight, 0);
 
   // Souběžná hledání: nejvýš 4 najednou, předhledání při plné kapacitě se vynechá

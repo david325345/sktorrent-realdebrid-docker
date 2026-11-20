@@ -77,8 +77,10 @@ const tbm = require(P + "/lib/tb");
   const MOB = { en: "MobLand", cz: "Země gangů", sk: "", year: "2025", seasonYears: { 1: "2025" } };
   await findTorrents({ type: "series", season: 1, episode: 1, titles: MOB });
   skt._breaker().openUntil = Date.now() - 1; sktMode = "ok"; LAT = 250;
-  f = await findTorrents({ type: "series", season: 1, episode: 2, titles: MOB });
-  const pw = f.audit.queries.map(q => q.probeWait || 0);
+  // dvě souběžná hledání: dotaz druhého čeká na zkušební dotaz prvního (od 3.9.3 jde nejdřív jen holý název)
+  const two = await Promise.all([findTorrents({ type: "series", season: 1, episode: 2, titles: MOB }), findTorrents({ type: "series", season: 1, episode: 1, titles: { en: "Peaky Blinders", cz: "Gangy z Birminghamu", sk: "", year: "2013" } })]);
+  f = two[0];
+  const pw = two.flatMap(x => x.audit.queries).map(q => q.probeWait || 0);
   eq("dotazy čekající na zkušební dotaz mají probeWait", pw.filter(x => x >= 150).length >= 1, true);
   LAT = 0;
 

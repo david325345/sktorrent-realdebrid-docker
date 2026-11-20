@@ -42,11 +42,18 @@ function analyze(recs){
     const from=recs[0]?.t?.slice(0,16).replace("T"," "), to=recs.at(-1)?.t?.slice(0,16).replace("T"," ");
     const ms=streams.map(r=>r.ms).filter(Number.isFinite);
     const withRes=streams.filter(r=>(r.torrents||[]).some(t=>t.ok));
+    // Dotazy na SKT: odeslané / z paměti / vyhodnocené lokálně z holého názvu (od 3.9.3) / přeskočené kvůli pauze či jističi
+    const allQ=streams.flatMap(r=>r.queries||[]).filter(q=>q.q);
+    const qLocal=allQ.filter(q=>q.ms==="lokálně").length, qCache=allQ.filter(q=>q.ms==="cache").length;
+    const qSkip=allQ.filter(q=>q.skip||(q.skip===undefined&&q.err&&/^(pauza|jistič)/.test(q.err)&&!(q.ms>50))).length;
+    const qSent=allQ.length-qLocal-qCache-qSkip;
+    const q429=allQ.filter(q=>q.err==="http 429"||q.retry==="http 429").length;
     L.push(`## Přehled`, ``,
         `- Období: ${from||"-"} – ${to||"-"} UTC`,
         `- Hledání: ${streams.length} (filmy ${streams.filter(r=>r.type==="movie").length}, epizody ${streams.filter(r=>r.type==="series").length}), s výsledkem ${withRes.length}, bez výsledku ${streams.length-withRes.length}`,
         `- Přehrání: ${plays.length} (chyb ${plays.filter(p=>p.status==="error").length}, fronta/limit služby ${plays.filter(p=>p.status==="queued"||p.status==="limit").length}, stahuje se ${plays.filter(p=>p.status==="downloading").length}), katalog: ${catalogs.length}`,
-        `- Doba hledání: medián ${quant(ms,0.5)} ms, p90 ${quant(ms,0.9)} ms, max ${ms.length?Math.max(...ms):0} ms`, ``);
+        `- Doba hledání: medián ${quant(ms,0.5)} ms, p90 ${quant(ms,0.9)} ms, max ${ms.length?Math.max(...ms):0} ms`,
+        `- Dotazy na SKT: odesláno ${qSent} (${streams.length?(qSent/streams.length).toFixed(1):0} na hledání), z paměti ${qCache}, lokálně z holého názvu ${qLocal}, přeskočeno (pauza / jistič) ${qSkip}, HTTP 429 ×${q429}`, ``);
 
     // 1) Bez výsledku — seskupeno podle titulu/epizody; zvlášť „SKT neodpověděl“, „vše odmítnuto“ a „SKT nic nevrátilo“
     const none=streams.filter(r=>!(r.torrents||[]).some(t=>t.ok));
@@ -56,12 +63,13 @@ function analyze(recs){
         ||((r.queries||[]).length>0&&(r.queries||[]).every(q=>q.ms==="cache"&&!q.n)&&(r.ms||0)>=9500);
     const down=none.filter(isDown);
     const downGroups=new Map();
-    const downKinds={}, downMsgs={};
+    const downKinds={}, downMsgs={}, downPause={};
     for(const r of down){
         const g=downGroups.get(r.id)||{ r, n:0, errs:{} }; g.n++;
         for(const q of r.queries||[]) if(q.err){
             g.errs[q.err]=(g.errs[q.err]||0)+1; downKinds[q.err]=(downKinds[q.err]||0)+1;
             if(q.msg&&!downMsgs[q.err]) downMsgs[q.err]=q.msg;
+            if(q.pause) downPause[q.err]=Math.max(downPause[q.err]||0,q.pause);     // pauza (s) podle Retry-After, od 3.9.3
         }
         downGroups.set(r.id,g);
     }
@@ -76,7 +84,7 @@ function analyze(recs){
         L.push(`Období: ${String(t0).slice(5,16).replace("T"," ")} – ${String(t1).slice(5,16).replace("T"," ")} UTC`, ``);
         // Druhy chyb (od 3.9.2 i HTTP status a zpráva: „http 429“, „http 404“…)
         const kinds=Object.entries(downKinds).sort((a,b)=>b[1]-a[1]);
-        if(kinds.length) L.push(`Druhy chyb: ${kinds.map(([k,v])=>`${esc(k)} ×${v}${downMsgs[k]?` („${esc(downMsgs[k])}“)`:""}`).join(", ")}`, ``);
+        if(kinds.length) L.push(`Druhy chyb: ${kinds.map(([k,v])=>`${esc(k)} ×${v}${downMsgs[k]?` („${esc(downMsgs[k])}“)`:""}${downPause[k]?` → pauza až ${downPause[k]} s`:""}`).join(", ")}`, ``);
         for(const { r, n, errs } of [...downGroups.values()].slice(0,LIMIT)){
             const e=Object.entries(errs).map(([k,v])=>`${k} ×${v}`).join(", ")||"odhad (bez pole err)";
             L.push(`- ${esc(what(r))}${n>1?` ×${n}`:""} — ${esc(e)}, ${r.ms} ms`);
@@ -165,7 +173,7 @@ function analyze(recs){
     const selText=(s={})=>s.fileId!==undefined?`file ${s.fileId}`:s.pack?`kolekce ${s.title} ${s.year||""}`:`S${s.season??"-"}E${s.episode??"-"}`;
     const errGroups=new Map();
     for(const p of bad){
-        const k=`${p.prov}|${p.h}|${p.r||p.status}`;
+        const k=`${p.prov}|${p.h}|${p.r||p.status}|${p.call||""}`;
         const g=errGroups.get(k)||{ p, n:0, first:p.t, last:p.t, sels:new Set(), times:[] };
         g.n++; g.last=p.t; g.sels.add(selText(p.sel)); g.times.push(Date.parse(p.t)||0);
         errGroups.set(k,g);
@@ -179,7 +187,8 @@ function analyze(recs){
         const loops=eg.filter(isLoop);
         if(loops.length) L.push(`⚠️ Smyčka (víc než 5× za 5 min): ${loops.map(g=>`${esc(clean(g.p.n||g.p.h).slice(0,60))} — ${esc(g.p.r||g.p.status)} ×${g.n}`).join("; ")}`, ``);
         L.push(`| Torrent | Služba | Výběr | Důvod | × | Od – do (UTC) |`, `|---|---|---|---|---|---|`);
-        for(const g of eg.slice(0,LIMIT)) L.push(`| ${esc(clean(g.p.n||g.p.h).slice(0,80))} | ${g.p.prov} | ${esc([...g.sels].slice(0,4).join(", "))} | ${esc(g.p.r||g.p.status)} | ${g.n} | ${String(g.first).slice(5,16).replace("T"," ")} – ${String(g.last).slice(5,16).replace("T"," ")} |`);
+        // call = které volání API služby chybu vrátilo (od 3.9.3), plan = plán účtu nedovoluje API
+        for(const g of eg.slice(0,LIMIT)) L.push(`| ${esc(clean(g.p.n||g.p.h).slice(0,80))} | ${g.p.prov} | ${esc([...g.sels].slice(0,4).join(", "))} | ${esc(g.p.r||g.p.status)}${g.p.call?` [${esc(g.p.call)}]`:""} | ${g.n} | ${String(g.first).slice(5,16).replace("T"," ")} – ${String(g.last).slice(5,16).replace("T"," ")} |`);
         L.push(``);
         for(const g of eg.filter(g=>g.p.videos?.length).slice(0,10)){
             L.push(`- Videa v **${esc(clean(g.p.n||g.p.h).slice(0,80))}** (${esc([...g.sels][0])}):`);
@@ -247,6 +256,19 @@ function analyze(recs){
         L.push(``);
     }
 
+    // 4d) IMDb tituly se známým ČSFD ID — záchrana sporného torrentu a veto torrentu s cizí částí názvu (od 3.9.3)
+    const ttCsfd=streams.filter(r=>!String(r.id||"").startsWith("csfd:")&&r.titles?.csfdId);
+    const vetoT=ttCsfd.flatMap(r=>(r.torrents||[]).filter(t=>/^jiné ČSFD/.test(t.r||"")).map(t=>({ r, t })));
+    if(vetoT.length){
+        L.push(`## IMDb tituly: vyřazeno kvůli jinému ČSFD v detailu (${vetoT.length})`, ``,
+            `Torrent prošel názvem jen přes jednu část, jiná část za „/“ je cizí název a detail odkazuje na jiný záznam ČSFD.`, ``,
+            `| Hledáno | ČSFD naše → torrentu | Torrent |`, `|---|---|---|`);
+        const seenV=new Set();
+        for(const { r, t } of vetoT){ const k=`${r.id}|${t.h}`; if(seenV.has(k)) continue; seenV.add(k); if(seenV.size>LIMIT) break;
+            L.push(`| ${esc(what(r))} | ${r.titles.csfdId} → ${t.csfd} | ${esc(clean(t.n).slice(0,110))} |`); }
+        L.push(``);
+    }
+
     // 5) Pomalá hledání
     const slow=streams.filter(r=>r.ms>4000).sort((a,b)=>b.ms-a.ms);
     L.push(`## Pomalá hledání > 4 s (${slow.length})`, ``);
@@ -256,7 +278,7 @@ function analyze(recs){
         // a na zkušební dotaz jističe (probeWait, od 3.9.1); chyby SKT
         L.push(`| Titul | ms | Dotazů | Čekání (fronta / spojení / jistič) | Chyby SKT |`, `|---|---|---|---|---|`);
         for(const r of slow.slice(0,20)){
-            const qs=r.queries||[];
+            const qs=(r.queries||[]).filter(q=>q.ms!=="lokálně");       // jen skutečné dotazy (ne vyhodnocené lokálně)
             const w=Math.max(0,...qs.map(q=>q.wait||0));
             const pw=Math.max(0,...qs.map(q=>q.probeWait||0));
             const errs=qs.filter(q=>q.err).length;

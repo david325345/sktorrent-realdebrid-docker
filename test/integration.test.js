@@ -33,10 +33,9 @@ axios.defaults.adapter = async (cfg) => {
   const ok = (data, status = 200) => ({ data, status, statusText: "OK", headers: {}, config: cfg, request: {} });
   // SKT
   if (url.host === "sktorrent.eu") {
-    const s = String(params.search || "");
-    if (/S01E05/.test(s)) return ok(skHtml([[A, "Show S01E05 CZ"]]));
-    if (/S01$/.test(s)) return ok(skHtml([[B, "Show S01 CZ komplet"]]));
-    return ok(skHtml([]));
+    // Jako SKT: všechna slova dotazu jako podřetězce názvu (holý název vrátí i epizodu a balík)
+    const words = String(params.search || "").toLowerCase().split(" ").filter(Boolean);
+    return ok(skHtml([[A, "Show S01E05 CZ"], [B, "Show S01 CZ komplet"]].filter(([, n]) => words.every(w => n.toLowerCase().includes(w)))));
   }
   // TMDB
   if (url.host === "api.themoviedb.org") {

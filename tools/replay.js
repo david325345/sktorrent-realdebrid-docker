@@ -13,12 +13,15 @@ function makeJudge(rec){
     // Tituly csfd: — ČSFD ID z detailu torrentu (pole csfd v archivu) má přednost před názvem
     const idParts=String(rec.id||"").split(":");
     const isCsfd=idParts[0]==="csfd";
-    // csfd: tituly — ČSFD rozhoduje oběma směry; IMDb tituly se známým ČSFD ID (od 3.9.0) — jen záchrana
+    // csfd: tituly — ČSFD rozhoduje oběma směry; IMDb tituly se známým ČSFD ID (od 3.9.0) — záchrana,
+    // od 3.9.3 i veto u torrentu s cizí částí názvu za „/“ („Mistr iluze / Deception“)
     const ourCsfd=isCsfd?+idParts[1]:(ti.csfdId?+ti.csfdId:null);
     const csfdOf=new Map((rec.torrents||[]).filter(t=>ourCsfd&&t.csfd!==undefined).map(t=>[t.n,t.csfd]));
     const csfdState=(n)=>{ if(!csfdOf.has(n)||csfdOf.get(n)===null) return null; return csfdOf.get(n)===ourCsfd?"match":"other"; };
-    const strict=(n,cat,o)=>{ const st=csfdState(n); return st==="match"?true:(st==="other"&&isCsfd)?false:strictRaw(n,cat,o); };
-    const nameReason=(n)=>isCsfd&&csfdState(n)==="other"?`jiné ČSFD (${csfdOf.get(n)})`:"název nesedí";
+    const foreign=M.makeForeignPartCheck?M.makeForeignPartCheck(all,strictRaw):()=>false;
+    const vetoed=(n,cat)=>csfdState(n)==="other"&&(isCsfd||foreign(n,cat));
+    const strict=(n,cat,o)=>{ const st=csfdState(n); return st==="match"?true:vetoed(n,cat)?false:strictRaw(n,cat,o); };
+    const nameReason=(n,cat)=>vetoed(n,cat)?`jiné ČSFD (${csfdOf.get(n)})`:"název nesedí";
     const base=M.makeStrictTitleMatcher(all.filter(Boolean).map(n=>n.replace(/(^|\s)\d{1,2}(?=\s|$)/g," ").trim()));
     const [s, e]=isCsfd?idParts.slice(2):idParts.slice(1);
     const f=s?M.episodeFilters(+s,+e):null;
@@ -26,16 +29,19 @@ function makeJudge(rec){
     const allowed=ALLOWED[rec.type==="series"?"series":"movie"];
     const tooOld=f?M.makeSeriesYearCheck(rec.year,all):()=>null;
     // seasonYear v archivu od 3.5.2, seasonAfter (sezóna novější než TMDB zná) od 3.8.0
-    const beforeSeason=f?M.makeSeasonYearCheck(rec.seasonYear,+s,all,{ lastKnownYear:rec.seasonAfter, seriesYear:rec.year }):()=>null;
+    const beforeSeason0=f?M.makeSeasonYearCheck(rec.seasonYear,+s,all,{ lastKnownYear:rec.seasonAfter, seriesYear:rec.year }):()=>null;
+    // od 3.9.3: torrent bez sezóny s jediným rokem jiným než premiéra i hledaná sezóna
+    const otherYear=f&&M.makeNoSeasonYearCheck?M.makeNoSeasonYearCheck(rec.seasonYear,rec.year,all):()=>null;
+    const beforeSeason=(n)=>beforeSeason0(n)||otherYear(n);
     return (t)=>{
         if(t.cat&&!allowed.test(t.cat)) return { ok:false, r:`kategorie mimo (${t.cat})` };
         if(!f){
             if(csfdState(t.n)!=="match"&&!M.filterYear([{ name:t.n }],year).length) return { ok:false, r:"rok nesedí" };
             if(M.isMakingOf&&M.isMakingOf(t.n,all)) return { ok:false, r:"dokument o filmu" };
-            if(!(strict(t.n,t.cat)||(M.isMoviePack(t.n)&&base(t.n,t.cat)))) return { ok:false, r:nameReason(t.n) };
+            if(!(strict(t.n,t.cat)||(M.isMoviePack(t.n)&&base(t.n,t.cat)))) return { ok:false, r:nameReason(t.n,t.cat) };
             return { ok:true, r:M.isMoviePack(t.n)?"kolekce":"film" };
         }
-        if(!strict(t.n,t.cat)) return { ok:false, r:nameReason(t.n) };
+        if(!strict(t.n,t.cat)) return { ok:false, r:nameReason(t.n,t.cat) };
         const old=csfdState(t.n)==="match"?null:tooOld(t.n);
         if(old) return { ok:false, r:old };
         if(f.matchesExactEpisode(t.n)) return { ok:true, r:"epizoda" };

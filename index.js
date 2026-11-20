@@ -21,7 +21,7 @@ const { createCache } = require("./lib/cache");
 const withTimeout=(promise,ms)=>Promise.race([promise,new Promise(r=>setTimeout(()=>r(null),ms).unref?.())]);
 
 const PORT = process.env.PORT || 3009;
-const VERSION = "3.9.2";
+const VERSION = "3.9.3";
 const MAX_EP_TORRENTS = 12;      // max torrentů s přesnou epizodou / filmů
 const MAX_ALL_TORRENTS = 15;     // max torrentů celkem (včetně balíků)
 
@@ -332,7 +332,7 @@ async function handlePlay(req,res,provId,hash,sel){
     else{
         try{ r=await p.resolve(key,hash,sel); }
         catch(e){ r={ status:"error", reason:e.message }; }
-        if(PLAY_MEMO.has(r.status)) playMemo.set(mk,{ status:r.status, reason:r.reason, videos:r.videos });
+        if(PLAY_MEMO.has(r.status)) playMemo.set(mk,{ status:r.status, reason:r.reason, videos:r.videos, ...(r.plan?{ plan:true }:{}) });
         else if(r.status==="downloading") playMemo.set(mk,{ status:r.status, progress:r.progress, state:r.state },PLAY_MEMO_DOWNLOADING_MS);
     }
     // Archiv: jen GET a ne opakované požadavky z cache (přehrávač volá /play víckrát)
@@ -341,6 +341,8 @@ async function handlePlay(req,res,provId,hash,sel){
         const rec={ kind:"play", prov:p.id, h:hash, n:t?.name||null, sel, status:r.status };
         if(r.file) rec.file=r.file;
         if(r.reason) rec.r=r.reason;
+        if(r.call) rec.call=r.call;          // které volání API služby chybu vrátilo (TorBox)
+        if(r.plan) rec.plan=true;            // plán účtu služby nedovoluje API
         if(r.status==="downloading"){ rec.progress=r.progress||0; if(r.state) rec.state=r.state; if(r.since) rec.since=r.since; }
         if(r.videos) rec.videos=r.videos;
         archive.write(rec);
@@ -352,7 +354,7 @@ async function handlePlay(req,res,provId,hash,sel){
     }
     if(r.status==="queued"||r.status==="limit"){
         if(!r.memo) console.log(`[Play] ⏳ ${r.reason} → info video`);
-        return res.redirect(302,staticUrl(req,"fronta.mp4"));
+        return res.redirect(302,staticUrl(req,r.plan?"torbox-plan.mp4":"fronta.mp4"));
     }
     if(!r.memo) console.log(`[Play] ❌ ${r.reason}`);
     return res.status(502).type("text/plain").send(`Chyba: ${r.reason}`);

@@ -71,7 +71,7 @@ const { makeJudge } = require(P + "/tools/replay");
   DB = [[h(1), "Law & Order: Special Victims Unit S01 (1999)(EN)[1080p]", "Seriál"]];
   // Otevřít jistič: SKT nejede
   skt._resetBreaker(); sktMode = "timeout";
-  await findTorrents({ type: "series", season: 1, episode: 1, titles: SVU });
+  for (let i = 1; i <= 3 && !skt.breakerOpen(); i++) await findTorrents({ type: "series", season: 1, episode: i, titles: SVU });
   eq("po timeoutech je jistič otevřený", skt.breakerOpen(), true);
   // Pauza vyprší, SKT zase jede
   skt._breaker().openUntil = Date.now() - 1; sktMode = "ok"; LAT = 150; calls.length = 0;
@@ -81,11 +81,12 @@ const { makeJudge } = require(P + "/tools/replay");
   eq("po pauze: proběhne i kolo s EN názvem a najde balík", [skCalls().some(q => /^Law Order Special Victims Unit/.test(q)), f.batchTorrents.map(t => t.hash)], [true, [h(1)]]);
   eq("jistič zavřený", [skt.breakerOpen(), skt._breaker().openUntil], [false, 0]);
   // Zkušební dotaz selže → čekající dotazy chyba, jistič zase otevřený
+  // (dvě souběžná hledání — dotaz druhého čeká na zkušební dotaz prvního)
   sktMode = "timeout"; skt._resetBreaker();
   await findTorrents({ type: "series", season: 1, episode: 2, titles: SVU });
   skt._breaker().openUntil = Date.now() - 1;
-  f = await findTorrents({ type: "series", season: 1, episode: 3, titles: SVU });
-  eq("zkušební dotaz selže: ostatní „jistič“, jistič znovu otevřený", [f.sktDown, f.audit.queries.filter(q => q.err === "jistič").length >= 3, skt.breakerOpen()], [true, true, true]);
+  const both = await Promise.all([findTorrents({ type: "series", season: 1, episode: 3, titles: SVU }), findTorrents({ type: "series", season: 1, episode: 4, titles: SVU })]);
+  eq("zkušební dotaz selže: ostatní „jistič“, jistič znovu otevřený", [both.every(x => x.sktDown), both.flatMap(x => x.audit.queries).filter(q => q.err === "jistič").length >= 2, skt.breakerOpen()], [true, true, true]);
   skt._resetBreaker(); sktMode = "ok"; LAT = 0;
 
   // ================= 2: nová sezóna — holý název a „seri“ jen 1. stránka =================
