@@ -8,7 +8,7 @@ let failed = 0;
 for (const t of tests) {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "skt-test-"));
     const env = { ...process.env, DATA_DIR: tmp, ARCHIVE: t === "gh.test.js" ? "1" : "0", ARCHIVE_DIR: path.join(tmp, "hledani"),
-                  ADMIN_KEY: "testkey", GH_ARCHIVE_REPO: t === "gh.test.js" ? "test/repo" : "", GH_ARCHIVE_TOKEN: t === "gh.test.js" ? "ghp_TEST_TOKEN" : "" };
+                  ADMIN_KEY: "testkey", SKT_RATE_PER_MIN: process.env.SKT_RATE_PER_MIN || "100000", GH_ARCHIVE_REPO: t === "gh.test.js" ? "test/repo" : "", GH_ARCHIVE_TOKEN: t === "gh.test.js" ? "ghp_TEST_TOKEN" : "" };
     const r = spawnSync(process.execPath, [path.join(__dirname, t), root], { env, encoding: "utf8", timeout: 120000 });
     const out = (r.stdout || "") + (r.stderr || "");
     const ok = r.status === 0 && /VŠE OK/.test(out);

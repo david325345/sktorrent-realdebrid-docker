@@ -38,7 +38,8 @@ const { pickMovieFile, isMoviePack, buildSearchNames } = require(P + "/lib/match
 (async () => {
   let r = await findTorrents({ type: "movie", titles: { en: "Predator", cz: "Predátor", year: "1987" } });
   eq("Predator 1987: nalezeno", r.torrents.map(t => t.name.slice(0, 20)), ["Predátor 1-5. filmů ", "Predátor / Predator "]);
-  eq("Predator: dotazy", q.splice(0), ["Predator 1987"]);
+  // od 3.9.4 nejdřív holý název; má plnou stránku (starší film pohřbený pod novinkami) → s rokem jde na SKT
+  eq("Predator: dotazy", q.splice(0), ["Predator", "Predator 1987"]);
   r = await findTorrents({ type: "movie", titles: { en: "Predator 2", year: "1990" } });
   eq("Predator 2 (1990): ne původní 1987", r.torrents.map(t => t.name.slice(0, 20)), ["Predátor 2 / Predato"]);
   q.splice(0);

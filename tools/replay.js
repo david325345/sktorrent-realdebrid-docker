@@ -19,9 +19,18 @@ function makeJudge(rec){
     const csfdOf=new Map((rec.torrents||[]).filter(t=>ourCsfd&&t.csfd!==undefined).map(t=>[t.n,t.csfd]));
     const csfdState=(n)=>{ if(!csfdOf.has(n)||csfdOf.get(n)===null) return null; return csfdOf.get(n)===ourCsfd?"match":"other"; };
     const foreign=M.makeForeignPartCheck?M.makeForeignPartCheck(all,strictRaw):()=>false;
-    const vetoed=(n,cat)=>csfdState(n)==="other"&&(isCsfd||foreign(n,cat));
+    // od 3.9.4: veto podle cizí části názvu — ČSFD z detailu jednoho torrentu „Mistr iluze / …“ platí pro všechny se stejnou částí
+    const partCsfd=new Map();
+    if(ourCsfd&&foreign.parts) for(const t of rec.torrents||[]) if(t.csfd!==undefined&&t.csfd!==null)
+        for(const p of foreign.parts(t.n,t.cat)){ if(!partCsfd.has(p)) partCsfd.set(p,new Set()); partCsfd.get(p).add(t.csfd); }
+    const partVeto=(n,cat)=>{ if(!partCsfd.size) return null; for(const p of foreign.parts(n,cat)){ const ids=partCsfd.get(p); if(ids&&!ids.has(ourCsfd)) return { id:[...ids][0], part:p }; } return null; };
+    const vetoed=(n,cat)=>{ const st=csfdState(n); return st==="other"?(isCsfd||foreign(n,cat)):st!=="match"&&!!partVeto(n,cat); };
     const strict=(n,cat,o)=>{ const st=csfdState(n); return st==="match"?true:vetoed(n,cat)?false:strictRaw(n,cat,o); };
-    const nameReason=(n,cat)=>vetoed(n,cat)?`jiné ČSFD (${csfdOf.get(n)})`:"název nesedí";
+    const nameReason=(n,cat)=>{
+        if(!vetoed(n,cat)) return "název nesedí";
+        if(csfdState(n)==="other") return `jiné ČSFD (${csfdOf.get(n)})`;
+        const pv=partVeto(n,cat); return `jiné ČSFD (${pv.id}, podle „${pv.part}“)`;
+    };
     const base=M.makeStrictTitleMatcher(all.filter(Boolean).map(n=>n.replace(/(^|\s)\d{1,2}(?=\s|$)/g," ").trim()));
     const [s, e]=isCsfd?idParts.slice(2):idParts.slice(1);
     const f=s?M.episodeFilters(+s,+e):null;
@@ -44,7 +53,11 @@ function makeJudge(rec){
         if(!strict(t.n,t.cat)) return { ok:false, r:nameReason(t.n,t.cat) };
         const old=csfdState(t.n)==="match"?null:tooOld(t.n);
         if(old) return { ok:false, r:old };
-        if(f.matchesExactEpisode(t.n)) return { ok:true, r:"epizoda" };
+        if(f.matchesExactEpisode(t.n)){
+            // od 3.9.4: holé „E05“ s jediným rokem jiným než premiéra i sezóna = díl jiné řady
+            const by=f.bareOnly&&f.bareOnly(t.n)&&M.makeNoSeasonYearCheck?M.makeNoSeasonYearCheck(rec.seasonYear||rec.year,rec.year,all)(t.n):null;
+            return by?{ ok:false, r:by.replace("bez sezóny","holý díl") }:{ ok:true, r:"epizoda" };
+        }
         if(f.isBatchSeason(t.n)) return { ok:true, r:"balík" };
         if(f.isNoSeasonCandidate(t.n)&&strict(t.n,t.cat,{ whole:true })){
             const before=beforeSeason(t.n);

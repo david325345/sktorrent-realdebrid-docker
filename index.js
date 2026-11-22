@@ -21,7 +21,7 @@ const { createCache } = require("./lib/cache");
 const withTimeout=(promise,ms)=>Promise.race([promise,new Promise(r=>setTimeout(()=>r(null),ms).unref?.())]);
 
 const PORT = process.env.PORT || 3009;
-const VERSION = "3.9.3";
+const VERSION = "3.9.4";
 const MAX_EP_TORRENTS = 12;      // max torrentů s přesnou epizodou / filmů
 const MAX_ALL_TORRENTS = 15;     // max torrentů celkem (včetně balíků)
 
@@ -224,7 +224,7 @@ app.get("/:token/stream/:type/:id.json",async(req,res)=>{
             titles:{ en:titles.en||titles.title||"", cz:titles.cz||"", sk:titles.sk||"", ...(titles.alt?.length?{ alt:titles.alt }:{}),
                 ...(titles.csfdTitle?{ csfdTitle:titles.csfdTitle }:{}), ...(!csfd&&titles.csfdId?{ csfdId:titles.csfdId }:{}) },
             names:found.names, queries:found.audit.queries, ms:found.ms,
-            ...(found.sktDown?{ sktDown:true }:{}), ...(found.queuedMs?{ queuedMs:found.queuedMs }:{}),
+            ...(found.sktDown?{ sktDown:true }:{}), ...(found.queuedMs?{ queuedMs:found.queuedMs }:{}), ...(found.details?{ details:found.details }:{}),
             providers:provs.map(p=>p.id), logged:!!(cfg.sktUid&&cfg.sktPass),
             streams:sentMap?sentMap.size:0,
             torrents:found.audit.torrents.map(({ t, ok, reason })=>{

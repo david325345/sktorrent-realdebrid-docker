@@ -45,7 +45,11 @@ function analyze(recs){
     // Dotazy na SKT: odeslané / z paměti / vyhodnocené lokálně z holého názvu (od 3.9.3) / přeskočené kvůli pauze či jističi
     const allQ=streams.flatMap(r=>r.queries||[]).filter(q=>q.q);
     const qLocal=allQ.filter(q=>q.ms==="lokálně").length, qCache=allQ.filter(q=>q.ms==="cache").length;
-    const qSkip=allQ.filter(q=>q.skip||(q.skip===undefined&&q.err&&/^(pauza|jistič)/.test(q.err)&&!(q.ms>50))).length;
+    const qSkip=allQ.filter(q=>q.skip||(q.skip===undefined&&q.err&&/^(pauza|jistič|limit addonu)/.test(q.err)&&!(q.ms>50))).length;
+    // Limit rychlosti addonu (od 3.9.4): přeskočené dotazy, čekání v limitu, stažené detaily torrentů
+    const qLimit=allQ.filter(q=>q.err==="limit addonu").length;
+    const rlW=allQ.map(q=>q.rl||0).filter(Boolean);
+    const detSent=streams.reduce((a,r)=>a+(r.details||0),0);
     const qSent=allQ.length-qLocal-qCache-qSkip;
     const q429=allQ.filter(q=>q.err==="http 429"||q.retry==="http 429").length;
     L.push(`## Přehled`, ``,
@@ -53,7 +57,8 @@ function analyze(recs){
         `- Hledání: ${streams.length} (filmy ${streams.filter(r=>r.type==="movie").length}, epizody ${streams.filter(r=>r.type==="series").length}), s výsledkem ${withRes.length}, bez výsledku ${streams.length-withRes.length}`,
         `- Přehrání: ${plays.length} (chyb ${plays.filter(p=>p.status==="error").length}, fronta/limit služby ${plays.filter(p=>p.status==="queued"||p.status==="limit").length}, stahuje se ${plays.filter(p=>p.status==="downloading").length}), katalog: ${catalogs.length}`,
         `- Doba hledání: medián ${quant(ms,0.5)} ms, p90 ${quant(ms,0.9)} ms, max ${ms.length?Math.max(...ms):0} ms`,
-        `- Dotazy na SKT: odesláno ${qSent} (${streams.length?(qSent/streams.length).toFixed(1):0} na hledání), z paměti ${qCache}, lokálně z holého názvu ${qLocal}, přeskočeno (pauza / jistič) ${qSkip}, HTTP 429 ×${q429}`, ``);
+        `- Dotazy na SKT: odesláno ${qSent} (${streams.length?(qSent/streams.length).toFixed(1):0} na hledání), z paměti ${qCache}, lokálně z holého názvu ${qLocal}, přeskočeno (pauza / jistič / limit) ${qSkip}, HTTP 429 ×${q429}`,
+        `- Limit rychlosti addonu: přeskočeno ${qLimit} dotazů, čekalo ${rlW.length} (max ${rlW.length?Math.max(...rlW):0} ms); staženo detailů torrentů ${detSent}`, ``);
 
     // 1) Bez výsledku — seskupeno podle titulu/epizody; zvlášť „SKT neodpověděl“, „vše odmítnuto“ a „SKT nic nevrátilo“
     const none=streams.filter(r=>!(r.torrents||[]).some(t=>t.ok));
