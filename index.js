@@ -15,7 +15,7 @@ const { baseUrl } = require("./lib/util");
 const { catalogFor, metaFor, streamsFor, playFor } = require("./lib/handlers");
 
 const PORT = process.env.PORT || 3009;
-const VERSION = "3.10.1";
+const VERSION = "3.10.2";
 
 const app = express();
 app.set("trust proxy", true);

@@ -97,7 +97,8 @@ const { makeJudge } = require(P + "/tools/replay");
   eq("nový seriál bez našeho titulu na 1. stránce: jen 1. stránky", skCalls().filter(q => / p\d/.test(q)), []);
   calls.length = 0;
   f = await findTorrents({ type: "series", season: 3, episode: 1, titles: { en: "CIA", cz: "CIA", sk: "", year: "2015", seasonYears: { 1: "2015", 2: "2016", 3: "2017" } } });
-  eq("stará sezóna: stránkuje se jako dřív", skCalls().filter(q => / p\d/.test(q)).length > 0, true);
+  // od 3.10.2 jedno pravidlo pro všechny sezóny: 1. kolo bez našeho titulu a varianty úplné → jen 1. stránky
+  eq("stará sezóna, 1. kolo bez titulu, varianty úplné: taky jen 1. stránky", skCalls().filter(q => / p\d/.test(q)), []);
   DB = [...Array.from({ length: 30 }, (_, i) => [h(200 + i), `CIA S01E0${(i % 9) + 1} verze ${i} (CZ)`, "Seriál"]), ...foreign];
   skt._resetBreaker(); calls.length = 0;
   f = await findTorrents({ type: "series", season: 1, episode: 5, titles: { en: "CIA", cz: "CIA", sk: "", year: String(YEAR), seasonYears: { 1: String(YEAR) } } });
