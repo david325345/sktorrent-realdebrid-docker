@@ -82,7 +82,9 @@ function analyze(recs){
     for(const r of none.filter(r=>!isDown(r))){ const g=groups.get(r.id)||{ r, n:0, raw:0 }; g.n++; g.r=r; g.raw=Math.max(g.raw,(r.torrents||[]).length); groups.set(r.id,g); }
     const rejected=[...groups.values()].filter(g=>g.raw>0), empty=[...groups.values()].filter(g=>g.raw===0);
     L.push(`## Hledání bez výsledku (${none.length} hledání, ${groups.size+downGroups.size} titulů)`, ``);
+    const downLimit=down.filter(r=>r.sktDown==="limit").length;      // od 3.10.3: jen limit rychlosti addonu, SKT odpovídal
     L.push(`### SKT neodpověděl (${down.length} hledání, ${downGroups.size} titulů) — výpadek / timeout, ne „titul tam není“`, ``);
+    if(downLimit) L.push(`Z toho ${downLimit}× jen limit rychlosti addonu (SKT na všechny poslané dotazy odpověděl; uživatel viděl „⏳ moc hledání“).`, ``);
     if(!down.length) L.push(`Žádné.`, ``);
     else{
         const t0=down[0].t, t1=down.at(-1).t;

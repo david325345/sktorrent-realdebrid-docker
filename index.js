@@ -15,7 +15,7 @@ const { baseUrl } = require("./lib/util");
 const { catalogFor, metaFor, streamsFor, playFor } = require("./lib/handlers");
 
 const PORT = process.env.PORT || 3009;
-const VERSION = "3.10.2";
+const VERSION = "3.10.3";
 
 const app = express();
 app.set("trust proxy", true);
@@ -124,7 +124,7 @@ app.get(`/:token/play/:hash(${H})/:season(\\d+)?/:episode(\\d+)?/video.mp4`,(req
 // Plugin na Apple TV (volba „Pomoct vylepšit hledání“, výchozí vypnutá) posílá anonymní záznam stejného
 // tvaru jako tento addon. Uloží se jen známá pole s časem serveru a via:"nuvio" — nic o uživateli ani IP.
 const archiveHits=new Map();   // IP → [časy] za poslední hodinu (300 záznamů / h)
-const REC_KEYS=new Set(["kind","v","type","id","year","seasonYear","seasonAfter","titles","names","queries","ms","sktDown","queuedMs",
+const REC_KEYS=new Set(["kind","v","type","id","year","seasonYear","seasonAfter","titles","names","queries","ms","sktDown","queuedMs","details",
     "providers","logged","streams","torrents","note","q","count","prov","h","n","sel","status","file","r","call","plan","progress","state","since","videos"]);
 const TORRENT_KEYS=["n","cat","s","seeds","h","ok","r","csfd","sent","pack","tb"];
 app.post("/api/archive",express.json({ limit:"512kb" }),(req,res)=>{

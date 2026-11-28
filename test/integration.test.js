@@ -159,6 +159,15 @@ axios.defaults.adapter = async (cfg) => {
   res = await get(`/${TOK}/play/rd/${D}/m/1979/alien/video.mp4`);
   eq("Kolekce: film chybí → 502", res.status, 502);
 
+  // Limit rychlosti addonu (od 3.10.3): dotazy jen přeskočené limitem → „⏳ moc hledání“, ne „SKT nedostupný“
+  const sktm = require(P + "/lib/skt"); sktm._resetBreaker();
+  const RL = sktm._rate(); for (let i = 0; i < RL.perMin; i++) RL.log.push(Date.now());
+  r = await (await get(`/${TOK}/stream/series/tt0000001:1:6.json`)).json();
+  eq("jen limit addonu: položka „moc hledání“ s videem skt-limit.mp4",
+    [r.streams.length, r.streams[0] && r.streams[0].name, /skt-limit\.mp4$/.test(r.streams[0] && r.streams[0].url || ""), r.cacheMaxAge], [1, "SKTorrent\n⏳ moc hledání", true, 0]);
+  sktm._resetBreaker();
+  eq("static video limitu", (await get(`/static/skt-limit.mp4`)).status, 200);
+
   // Validace + statika + verify + 404
   eq("neplatný hash → 404", (await get(`/${TOK}/play/rd/xyz/video.mp4`)).status, 404);
   eq("play bez TB klíče → 400", (await get(`/RD--a--b--c--0/play/tb/${B}/video.mp4`)).status, 400);
